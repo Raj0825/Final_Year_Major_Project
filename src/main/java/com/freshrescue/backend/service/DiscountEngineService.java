@@ -44,10 +44,27 @@ public class DiscountEngineService {
         );
 
         for (Batch batch : active) {
-            if (batch.getFreshnessScore() == null || batch.getUpdatedAt() == null) continue;
+            if (batch.getFreshnessScore() == null && batch.getPredictedExpiryDate() == null) continue;
 
-            double hoursSinceUpdate = Duration.between(batch.getUpdatedAt(), Instant.now()).toHours();
-            double estimatedScore = Math.max(0, batch.getFreshnessScore() - (hoursSinceUpdate * DECAY_PER_HOUR));
+            double estimatedScore = batch.getFreshnessScore() != null ? batch.getFreshnessScore() : 1.0;
+            if (batch.getFreshnessScore() != null && batch.getUpdatedAt() != null) {
+                double hoursSinceUpdate = Duration.between(batch.getUpdatedAt(), Instant.now()).toHours();
+                estimatedScore = Math.max(0, batch.getFreshnessScore() - (hoursSinceUpdate * DECAY_PER_HOUR));
+            }
+
+            // Time-to-expiry alignment: smoothly degrade tier as the predicted expiry date approaches
+            if (batch.getPredictedExpiryDate() != null) {
+                long hoursUntilExpiry = Duration.between(Instant.now(), batch.getPredictedExpiryDate()).toHours();
+                if (hoursUntilExpiry <= 0) {
+                    estimatedScore = 0.05; // Past expiry -> transitions to EXPIRED
+                } else if (hoursUntilExpiry <= 48) { // <= 2 days left
+                    estimatedScore = Math.min(estimatedScore, 0.25); // transitions to TIER_3 (urgent -60%)
+                } else if (hoursUntilExpiry <= 96) { // <= 4 days left
+                    estimatedScore = Math.min(estimatedScore, 0.45); // transitions to TIER_2 (-40%)
+                } else if (hoursUntilExpiry <= 168) { // <= 7 days left
+                    estimatedScore = Math.min(estimatedScore, 0.65); // transitions to TIER_1 (-20%)
+                }
+            }
 
             boolean changed = batchStateService.applyTransition(batch, estimatedScore);
             if (changed) {
