@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from "react"
 import { useAuth } from "../context/AuthContext"
-import { getMyBatches, getBatchesForStore } from "../api/batches"
+import { getMyBatches, getBatchesForStore, syncAllListings } from "../api/batches"
 import { getMyStore } from "../api/stores"
 import { useNavigate } from "react-router-dom"
 import type { Batch } from "../types"
 import TierBadge from "../components/shared/TierBadge"
 import AppLayout from "../components/layout/AppLayout"
 import AddBatchModal from "../components/shared/AddBatchModal"
+import { useToast } from "../context/ToastContext"
 
 export default function StoreDashboardPage() {
   const { user, login } = useAuth()
@@ -59,6 +60,22 @@ export default function StoreDashboardPage() {
     expired: batches.filter((b) => b.state === "EXPIRED").length,
   }
 
+  const [syncing, setSyncing] = useState(false)
+  const { addToast } = useToast()
+
+  const handleSyncListings = async () => {
+    setSyncing(true)
+    try {
+      await syncAllListings()
+      addToast("All batches synced to Customer Listings! 🛒", "success")
+      fetchBatches()
+    } catch (err: any) {
+      addToast("Failed to sync listings", "error")
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   return (
     <AppLayout>
       <div className="page-header flex items-center justify-between" style={{ flexWrap: "wrap", gap: 12 }}>
@@ -68,9 +85,14 @@ export default function StoreDashboardPage() {
             Manage batches and track freshness for store <strong>{storeId || "Active Store"}</strong>
           </p>
         </div>
-        <button id="add-batch-btn" className="btn btn-primary" onClick={() => setShowAdd(true)}>
-          + Add Batch
-        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="btn btn-secondary" onClick={handleSyncListings} disabled={syncing}>
+            {syncing ? "Syncing..." : "🔄 Sync Listings"}
+          </button>
+          <button id="add-batch-btn" className="btn btn-primary" onClick={() => setShowAdd(true)}>
+            + Add Batch
+          </button>
+        </div>
       </div>
 
       {/* Stats */}

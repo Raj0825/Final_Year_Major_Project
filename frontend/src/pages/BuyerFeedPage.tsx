@@ -40,9 +40,12 @@ export default function BuyerFeedPage() {
     try {
       let data: Listing[] = []
       if (tab === "nearby" && pos) {
-        data = await getNearbyListings(pos.lat, pos.lng, radius)
-        if (data.length === 0) {
-          // If no geo-indexed store found nearby, load all listings
+        try {
+          data = await getNearbyListings(pos.lat, pos.lng, radius)
+        } catch {
+          data = await getAllListings()
+        }
+        if (!data || data.length === 0) {
           data = await getAllListings()
         }
       } else if (tab === "urgent") {
@@ -50,9 +53,14 @@ export default function BuyerFeedPage() {
       } else {
         data = await getAllListings()
       }
-      setListings(data)
+      setListings(data || [])
     } catch {
-      setError("Failed to load listings. Is the backend running?")
+      try {
+        const fallback = await getAllListings()
+        setListings(fallback || [])
+      } catch {
+        setError("Failed to load listings. Please ensure the backend is running.")
+      }
     } finally {
       setLoading(false)
     }

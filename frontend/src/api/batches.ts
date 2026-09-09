@@ -24,6 +24,12 @@ export const getBatchesForStore = (storeId: string) =>
 export const getMyBatches = () =>
   api.get<Batch[]>('/batches/my-batches').then((r) => r.data)
 
+export const updateBatchTier = (id: string, state: string, discountPercent?: number) =>
+  api.patch<Batch>(`/batches/${id}/tier`, { state, discountPercent }).then((r) => r.data)
+
+export const syncAllListings = () =>
+  api.post<Batch[]>('/batches/sync-listings').then((r) => r.data)
+
 export const scanBatch = (id: string, image: File) => {
   const form = new FormData()
   form.append('image', image)

@@ -1,6 +1,6 @@
-﻿import React, { useState, useEffect, useCallback, useRef } from "react"
+import React, { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { getBatch, scanBatch } from "../api/batches"
+import { getBatch, scanBatch, updateBatchTier } from "../api/batches"
 import type { Batch } from "../types"
 import TierBadge from "../components/shared/TierBadge"
 import FreshnessGauge from "../components/shared/FreshnessGauge"
@@ -14,6 +14,7 @@ export default function BatchDetailPage() {
   const [batch, setBatch] = useState<Batch | null>(null)
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
+  const [updatingTier, setUpdatingTier] = useState(false)
   const [activeImg, setActiveImg] = useState(0)
   const [dragOver, setDragOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -35,6 +36,20 @@ export default function BatchDetailPage() {
     } catch (err: any) {
       addToast(err.response?.data?.message ?? "Scan failed — check ML service", "error")
     } finally { setScanning(false) }
+  }
+
+  async function handleSetTier(tier: string, discount: number) {
+    if (!id) return
+    setUpdatingTier(true)
+    try {
+      const updated = await updateBatchTier(id, tier, discount)
+      setBatch(updated)
+      addToast(`Batch updated to ${tier.replace("_", " ")} (-${discount}%) and synced to Customer Feed! 🛒`, "success")
+    } catch (err: any) {
+      addToast(err.response?.data?.message ?? "Failed to update tier", "error")
+    } finally {
+      setUpdatingTier(false)
+    }
   }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -66,7 +81,7 @@ export default function BatchDetailPage() {
   return (
     <AppLayout>
       <div style={{ marginBottom: 16 }}>
-        <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>← Back</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>← Back to Batches</button>
       </div>
 
       <div className="page-header flex items-center justify-between" style={{ flexWrap: "wrap", gap: 16 }}>
@@ -82,10 +97,55 @@ export default function BatchDetailPage() {
 
       {/* Manual Review Alert */}
       {batch.needsManualReview && (
-        <div className="alert alert-error" style={{ marginBottom: 24 }}>
-          ⚠️ <strong>Manual review required.</strong> The ML scan failed for this batch — please verify freshness manually and rescan.
+        <div className="alert alert-warning" style={{ marginBottom: 24 }}>
+          ⚠️ <strong>Manual review required.</strong> ML scan encountered an error — you can set the discount tier manually below to list this item immediately!
         </div>
       )}
+
+      {/* Manual Tier / Discount Controls */}
+      <div className="card card-body" style={{ marginBottom: 24, border: "1px solid var(--accent)" }}>
+        <h3 style={{ fontWeight: 700, fontSize: "1.1rem", marginBottom: 6 }}>
+          🏷️ Manage Shelf Tier & Customer Discount
+        </h3>
+        <p className="text-sm text-muted" style={{ marginBottom: 14 }}>
+          Setting a discount tier automatically publishes this item to the Customer Browse Listings feed.
+        </p>
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={`btn btn-sm${batch.state === "TIER_1" ? " btn-primary" : " btn-secondary"}`}
+            onClick={() => handleSetTier("TIER_1", 20)}
+            disabled={updatingTier}
+          >
+            🟡 Tier 1 (-20% Off)
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm${batch.state === "TIER_2" ? " btn-primary" : " btn-secondary"}`}
+            onClick={() => handleSetTier("TIER_2", 40)}
+            disabled={updatingTier}
+          >
+            🟠 Tier 2 (-40% Off)
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm${batch.state === "TIER_3" ? " btn-danger" : " btn-secondary"}`}
+            onClick={() => handleSetTier("TIER_3", 60)}
+            disabled={updatingTier}
+          >
+            🔴 Tier 3 (-60% Urgent 🔥)
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm${batch.state === "FRESH" ? " btn-primary" : " btn-secondary"}`}
+            onClick={() => handleSetTier("FRESH", 0)}
+            disabled={updatingTier}
+          >
+            🟢 Fresh (0% Full Price)
+          </button>
+        </div>
+      </div>
 
       <div className="grid-2" style={{ gap: 24 }}>
         {/* Left: Info + Images */}
@@ -200,4 +260,3 @@ export default function BatchDetailPage() {
     </AppLayout>
   )
 }
-

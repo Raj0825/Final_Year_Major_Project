@@ -7,6 +7,7 @@ import com.freshrescue.backend.repository.BatchRepository;
 import com.freshrescue.backend.repository.StoreRepository;
 import com.freshrescue.backend.repository.UserRepository;
 import com.freshrescue.backend.service.BatchService;
+import com.freshrescue.backend.service.ListingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -26,6 +27,9 @@ public class BatchController {
     private final BatchRepository batchRepository;
     private final UserRepository userRepository;
     private final StoreRepository storeRepository;
+    private final ListingService listingService;
+
+    public record UpdateTierRequest(Batch.BatchState state, Integer discountPercent) {}
 
     /**
      * Resolves the caller's store reliably:
@@ -94,7 +98,9 @@ public class BatchController {
     public Batch createBatch(@RequestBody Batch batch, Authentication auth) {
         String verifiedStoreId = resolveAndVerifyStore(auth, batch.getStoreId());
         batch.setStoreId(verifiedStoreId);
-        return batchService.createBatch(batch);
+        Batch created = batchService.createBatch(batch);
+        listingService.syncListingForBatch(created);
+        return created;
     }
 
     @GetMapping("/my-batches")
@@ -117,6 +123,41 @@ public class BatchController {
     public List<Batch> getBatchesForStore(@PathVariable String storeId, Authentication auth) {
         String verifiedStoreId = resolveAndVerifyStore(auth, storeId);
         return batchRepository.findByStoreId(verifiedStoreId);
+    }
+
+    @PatchMapping("/{id}/tier")
+    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
+    public Batch updateBatchTier(@PathVariable String id, @RequestBody UpdateTierRequest req, Authentication auth) {
+        Batch batch = batchService.getBatch(id);
+        resolveAndVerifyStore(auth, batch.getStoreId());
+        if (req.state() != null) {
+            batch.setState(req.state());
+        }
+        if (req.discountPercent() != null) {
+            batch.setCurrentDiscountPercent(req.discountPercent());
+        } else if (req.state() == Batch.BatchState.TIER_1) {
+            batch.setCurrentDiscountPercent(20);
+        } else if (req.state() == Batch.BatchState.TIER_2) {
+            batch.setCurrentDiscountPercent(40);
+        } else if (req.state() == Batch.BatchState.TIER_3) {
+            batch.setCurrentDiscountPercent(60);
+        } else if (req.state() == Batch.BatchState.FRESH) {
+            batch.setCurrentDiscountPercent(0);
+        }
+        batch.setNeedsManualReview(false);
+        Batch saved = batchRepository.save(batch);
+        listingService.syncListingForBatch(saved);
+        return saved;
+    }
+
+    @PostMapping("/sync-listings")
+    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
+    public List<Batch> syncAllListings(Authentication auth) {
+        List<Batch> batches = batchRepository.findAll();
+        for (Batch b : batches) {
+            listingService.syncListingForBatch(b);
+        }
+        return batches;
     }
 
     @PostMapping(value = "/{id}/scan", consumes = "multipart/form-data")
