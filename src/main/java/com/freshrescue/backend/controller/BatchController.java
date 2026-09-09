@@ -96,8 +96,10 @@ public class BatchController {
     @PostMapping
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public Batch createBatch(@RequestBody Batch batch, Authentication auth) {
+        String userId = auth.getName();
         String verifiedStoreId = resolveAndVerifyStore(auth, batch.getStoreId());
         batch.setStoreId(verifiedStoreId);
+        batch.setManagerId(userId);
         Batch created = batchService.createBatch(batch);
         listingService.syncListingForBatch(created);
         return created;
@@ -106,8 +108,33 @@ public class BatchController {
     @GetMapping("/my-batches")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public List<Batch> getMyBatches(Authentication auth) {
-        String verifiedStoreId = resolveAndVerifyStore(auth, null);
-        return batchRepository.findByStoreId(verifiedStoreId);
+        String userId = auth.getName();
+        User user = userRepository.findById(userId).orElse(null);
+
+        java.util.Set<String> myStoreIds = new java.util.HashSet<>();
+        if (auth.getDetails() != null) myStoreIds.add((String) auth.getDetails());
+        if (user != null && user.getStoreId() != null) myStoreIds.add(user.getStoreId());
+        List<Store> stores = storeRepository.findByManagerId(userId);
+        for (Store s : stores) {
+            myStoreIds.add(s.getId());
+            if (s.getName() != null) myStoreIds.add(s.getName());
+        }
+
+        List<Batch> all = batchRepository.findAll();
+        List<Batch> result = new java.util.ArrayList<>();
+        for (Batch b : all) {
+            boolean matches = (b.getManagerId() != null && b.getManagerId().equals(userId))
+                    || (b.getStoreId() != null && myStoreIds.contains(b.getStoreId()))
+                    || b.getManagerId() == null; // auto-claim unassigned batches for single manager
+            if (matches) {
+                if (b.getManagerId() == null) {
+                    b.setManagerId(userId);
+                    batchRepository.save(b);
+                }
+                result.add(b);
+            }
+        }
+        return result;
     }
 
     @GetMapping("/{id}")

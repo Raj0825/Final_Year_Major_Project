@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react"
 import { useAuth } from "../context/AuthContext"
 import { getMyBatches, getBatchesForStore } from "../api/batches"
+import { getMyStore } from "../api/stores"
 import { useNavigate } from "react-router-dom"
 import type { Batch } from "../types"
 import TierBadge from "../components/shared/TierBadge"
@@ -43,16 +44,31 @@ export default function StoreBatchesPage() {
     return matchState && matchSearch
   })
 
+  const [storeName, setStoreName] = useState("")
+
+  useEffect(() => {
+    getMyStore().then((s) => {
+      if (s?.name) setStoreName(s.name)
+    }).catch(() => {})
+  }, [])
+
   return (
     <AppLayout>
       <div className="page-header flex items-center justify-between" style={{ flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 className="page-title">All Batches 📦</h1>
-          <p className="page-subtitle">Complete inventory view for store <strong>{storeId || "Active Store"}</strong></p>
+          <p className="page-subtitle">
+            Complete inventory view for <strong>{storeName || storeId || "Active Store"}</strong> ({batches.length} total)
+          </p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
-          + Add Batch
-        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="btn btn-secondary" onClick={() => fetchBatches()}>
+            🔄 Refresh
+          </button>
+          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
+            + Add Batch
+          </button>
+        </div>
       </div>
 
       <div className="filter-bar" style={{ marginBottom: 24 }}>

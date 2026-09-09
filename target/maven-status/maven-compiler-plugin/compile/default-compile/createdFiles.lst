@@ -9,3 +9,4 @@ com\freshrescue\backend\controller\BatchController.class
 com\freshrescue\backend\service\BatchService.class
 com\freshrescue\backend\service\BatchStateService$1.class
 com\freshrescue\backend\entity\Review$ReviewBuilder.class
+com\freshrescue\backend\entity\Batch.class

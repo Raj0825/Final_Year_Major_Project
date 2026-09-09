@@ -32,6 +32,7 @@ public class Batch {
     private String id;
 
     private String storeId;
+    private String managerId;
     private String productName;   // e.g. "Banana"
     private String category;      // e.g. "Fruit"
 
