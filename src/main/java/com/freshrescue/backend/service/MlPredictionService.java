@@ -33,9 +33,15 @@ public class MlPredictionService {
 
     /** Empty when the ML call failed - caller must NOT guess a score in that case, see BatchService#scanBatch. */
     public Optional<MlPredictionResponse> predict(byte[] imageBytes, String filename) {
+        org.springframework.core.io.ByteArrayResource imageResource = new org.springframework.core.io.ByteArrayResource(imageBytes) {
+            @Override
+            public String getFilename() {
+                return filename != null && !filename.isBlank() ? filename : "image.jpg";
+            }
+        };
+
         MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
-        bodyBuilder.part("image", new ByteArrayInputStream(imageBytes))
-                .filename(filename)
+        bodyBuilder.part("image", imageResource)
                 .contentType(MediaType.IMAGE_JPEG);
 
         try {

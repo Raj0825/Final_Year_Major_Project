@@ -62,7 +62,13 @@ public class BatchService {
         if (batch.getImageUrls() == null) {
             batch.setImageUrls(new ArrayList<>());
         }
-        batch.getImageUrls().add(filename); // placeholder - real impl stores to disk/S3 and saves the URL
+        if (imageBytes != null && imageBytes.length > 0) {
+            String mime = (filename != null && filename.toLowerCase().endsWith(".png")) ? "image/png" : "image/jpeg";
+            String base64 = java.util.Base64.getEncoder().encodeToString(imageBytes);
+            batch.getImageUrls().add("data:" + mime + ";base64," + base64);
+        } else if (filename != null && !filename.isBlank()) {
+            batch.getImageUrls().add(filename);
+        }
 
         Optional<MlPredictionResponse> predictionOpt = mlPredictionService.predict(imageBytes, filename);
 

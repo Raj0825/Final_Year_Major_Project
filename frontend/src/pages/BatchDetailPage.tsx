@@ -156,16 +156,18 @@ export default function BatchDetailPage() {
             {batch.imageUrls?.length > 0 ? (
               <>
                 <img
-                  src={batch.imageUrls[activeImg]}
+                  src={batch.imageUrls[activeImg]?.startsWith("http") || batch.imageUrls[activeImg]?.startsWith("data:") ? batch.imageUrls[activeImg] : "https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=600&auto=format&fit=crop&q=60"}
                   alt={`Batch scan ${activeImg + 1}`}
+                  onError={(e) => { (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=600&auto=format&fit=crop&q=60" }}
                   style={{ width: "100%", height: 240, objectFit: "cover", borderRadius: "var(--radius)", marginBottom: 10 }}
                 />
                 <div className="image-gallery">
                   {batch.imageUrls.map((url, i) => (
                     <img
                       key={i}
-                      src={url}
+                      src={url?.startsWith("http") || url?.startsWith("data:") ? url : "https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=600&auto=format&fit=crop&q=60"}
                       alt={`Scan ${i + 1}`}
+                      onError={(e) => { (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=600&auto=format&fit=crop&q=60" }}
                       className={`gallery-thumb${i === activeImg ? " active" : ""}`}
                       onClick={() => setActiveImg(i)}
                     />
