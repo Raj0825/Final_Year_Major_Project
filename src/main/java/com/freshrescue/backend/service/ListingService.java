@@ -76,4 +76,8 @@ public class ListingService {
     public List<Listing> findUrgent() {
         return listingRepository.findByUrgentTrue();
     }
+
+    public List<Listing> findAll() {
+        return listingRepository.findAll();
+    }
 }

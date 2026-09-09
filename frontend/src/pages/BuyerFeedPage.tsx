@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react"
-import { getNearbyListings, getUrgentListings } from "../api/listings"
+import { getNearbyListings, getUrgentListings, getAllListings } from "../api/listings"
 import type { Listing } from "../types"
 import ListingCard from "../components/listing/ListingCard"
 import ReserveModal from "../components/listing/ReserveModal"
@@ -10,11 +10,11 @@ const CATEGORIES = ["All", "Fruit", "Vegetable", "Dairy", "Bakery", "Meat", "Sea
 const TIERS = ["All", "TIER_1", "TIER_2", "TIER_3"]
 
 export default function BuyerFeedPage() {
-  const [tab, setTab] = useState<"nearby" | "urgent">("nearby")
+  const [tab, setTab] = useState<"all" | "nearby" | "urgent">("all")
   const [listings, setListings] = useState<Listing[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [radius, setRadius] = useState(5)
+  const [radius, setRadius] = useState(10)
   const [category, setCategory] = useState("All")
   const [search, setSearch] = useState("")
   const [tierFilter, setTierFilter] = useState("All")
@@ -29,7 +29,7 @@ export default function BuyerFeedPage() {
     if (tab === "nearby") {
       navigator.geolocation?.getCurrentPosition(
         (p) => setPos({ lat: p.coords.latitude, lng: p.coords.longitude }),
-        () => setPos({ lat: 28.6139, lng: 77.209 }) // Default: Delhi
+        () => setPos({ lat: 28.6139, lng: 77.209 }) // Default
       )
     }
   }, [tab])
@@ -38,13 +38,17 @@ export default function BuyerFeedPage() {
     setLoading(true)
     setError("")
     try {
-      let data: Listing[]
+      let data: Listing[] = []
       if (tab === "nearby" && pos) {
         data = await getNearbyListings(pos.lat, pos.lng, radius)
+        if (data.length === 0) {
+          // If no geo-indexed store found nearby, load all listings
+          data = await getAllListings()
+        }
       } else if (tab === "urgent") {
         data = await getUrgentListings()
       } else {
-        data = []
+        data = await getAllListings()
       }
       setListings(data)
     } catch {
@@ -76,7 +80,8 @@ export default function BuyerFeedPage() {
 
       {/* Tabs */}
       <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
-        <div className="tabs" style={{ maxWidth: 320 }}>
+        <div className="tabs" style={{ maxWidth: 420 }}>
+          <button id="tab-all" className={`tab${tab === "all" ? " active" : ""}`} onClick={() => setTab("all")}>🌟 All Deals</button>
           <button id="tab-nearby" className={`tab${tab === "nearby" ? " active" : ""}`} onClick={() => setTab("nearby")}>📍 Nearby</button>
           <button id="tab-urgent" className={`tab${tab === "urgent" ? " active" : ""}`} onClick={() => setTab("urgent")}>🔥 Urgent</button>
         </div>

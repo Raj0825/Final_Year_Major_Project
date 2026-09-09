@@ -1,5 +1,8 @@
-﻿import api from './client'
+import api from './client'
 import type { Listing } from '../types'
+
+export const getAllListings = () =>
+  api.get<Listing[]>('/listings').then((r) => r.data)
 
 export const getNearbyListings = (lat: number, lng: number, radiusKm = 5) =>
   api

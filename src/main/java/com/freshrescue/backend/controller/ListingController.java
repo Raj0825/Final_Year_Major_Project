@@ -31,4 +31,10 @@ public class ListingController {
     public List<Listing> urgent() {
         return listingService.findUrgent();
     }
+
+    @GetMapping
+    public List<Listing> getAll() {
+        return listingService.findAll();
+    }
 }
+
