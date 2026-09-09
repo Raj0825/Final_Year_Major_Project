@@ -1,7 +1,8 @@
-﻿import React from "react"
+import React from "react"
 import { Routes, Route, Navigate } from "react-router-dom"
 import { AuthProvider } from "./context/AuthContext"
 import { ToastProvider } from "./context/ToastContext"
+import { ThemeProvider } from "./context/ThemeContext"
 import ProtectedRoute from "./components/auth/ProtectedRoute"
 import ToastContainer from "./components/shared/ToastContainer"
 
@@ -14,62 +15,90 @@ import StoreDashboardPage from "./pages/StoreDashboardPage"
 import StoreBatchesPage from "./pages/StoreBatchesPage"
 import BatchDetailPage from "./pages/BatchDetailPage"
 import StoreFulfillOrdersPage from "./pages/StoreFulfillOrdersPage"
+import NotificationsPage from "./pages/NotificationsPage"
+import AnalyticsDashboardPage from "./pages/AnalyticsDashboardPage"
+import UserProfilePage from "./pages/UserProfilePage"
+import StoreRegisterPage from "./pages/StoreRegisterPage"
 
 export default function App() {
   return (
-    <ToastProvider>
-      <AuthProvider>
-        <Routes>
-          {/* Public */}
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/signup" element={<SignupPage />} />
+    <ThemeProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <Routes>
+            {/* Public */}
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/signup" element={<SignupPage />} />
 
-          {/* Buyer routes */}
-          <Route path="/feed" element={
-            <ProtectedRoute allowedRoles={["CUSTOMER", "NGO"]}>
-              <BuyerFeedPage />
-            </ProtectedRoute>
-          } />
-          <Route path="/feed/map" element={
-            <ProtectedRoute allowedRoles={["CUSTOMER", "NGO"]}>
-              <MapPage />
-            </ProtectedRoute>
-          } />
-          <Route path="/my-orders" element={
-            <ProtectedRoute allowedRoles={["CUSTOMER", "NGO"]}>
-              <MyOrdersPage />
-            </ProtectedRoute>
-          } />
+            {/* Buyer routes */}
+            <Route path="/feed" element={
+              <ProtectedRoute allowedRoles={["CUSTOMER", "NGO"]}>
+                <BuyerFeedPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/feed/map" element={
+              <ProtectedRoute allowedRoles={["CUSTOMER", "NGO"]}>
+                <MapPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/my-orders" element={
+              <ProtectedRoute allowedRoles={["CUSTOMER", "NGO"]}>
+                <MyOrdersPage />
+              </ProtectedRoute>
+            } />
 
-          {/* Store routes */}
-          <Route path="/store/dashboard" element={
-            <ProtectedRoute allowedRoles={["STORE_MANAGER", "STORE_STAFF"]}>
-              <StoreDashboardPage />
-            </ProtectedRoute>
-          } />
-          <Route path="/store/batches" element={
-            <ProtectedRoute allowedRoles={["STORE_MANAGER", "STORE_STAFF"]}>
-              <StoreBatchesPage />
-            </ProtectedRoute>
-          } />
-          <Route path="/store/batch/:id" element={
-            <ProtectedRoute allowedRoles={["STORE_MANAGER", "STORE_STAFF"]}>
-              <BatchDetailPage />
-            </ProtectedRoute>
-          } />
-          <Route path="/store/orders" element={
-            <ProtectedRoute allowedRoles={["STORE_MANAGER", "STORE_STAFF"]}>
-              <StoreFulfillOrdersPage />
-            </ProtectedRoute>
-          } />
+            {/* Store routes */}
+            <Route path="/store/dashboard" element={
+              <ProtectedRoute allowedRoles={["STORE_MANAGER", "STORE_STAFF"]}>
+                <StoreDashboardPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/store/batches" element={
+              <ProtectedRoute allowedRoles={["STORE_MANAGER", "STORE_STAFF"]}>
+                <StoreBatchesPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/store/batch/:id" element={
+              <ProtectedRoute allowedRoles={["STORE_MANAGER", "STORE_STAFF"]}>
+                <BatchDetailPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/store/orders" element={
+              <ProtectedRoute allowedRoles={["STORE_MANAGER", "STORE_STAFF"]}>
+                <StoreFulfillOrdersPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/store/analytics" element={
+              <ProtectedRoute allowedRoles={["STORE_MANAGER", "STORE_STAFF"]}>
+                <AnalyticsDashboardPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/store/register" element={
+              <ProtectedRoute allowedRoles={["STORE_MANAGER"]}>
+                <StoreRegisterPage />
+              </ProtectedRoute>
+            } />
 
-          {/* Default redirect */}
-          <Route path="/" element={<RootRedirect />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-        <ToastContainer />
-      </AuthProvider>
-    </ToastProvider>
+            {/* General authenticated routes */}
+            <Route path="/notifications" element={
+              <ProtectedRoute allowedRoles={["CUSTOMER", "NGO", "STORE_MANAGER", "STORE_STAFF"]}>
+                <NotificationsPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/profile" element={
+              <ProtectedRoute allowedRoles={["CUSTOMER", "NGO", "STORE_MANAGER", "STORE_STAFF"]}>
+                <UserProfilePage />
+              </ProtectedRoute>
+            } />
+
+            {/* Default redirect */}
+            <Route path="/" element={<RootRedirect />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+          <ToastContainer />
+        </AuthProvider>
+      </ToastProvider>
+    </ThemeProvider>
   )
 }
 

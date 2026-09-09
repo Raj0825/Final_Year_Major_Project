@@ -9,6 +9,8 @@ public interface ListingRepository extends MongoRepository<Listing, String> {
 
     Listing findByBatchId(String batchId);
 
+    List<Listing> findByStoreId(String storeId);
+
     List<Listing> findByCategory(String category);
 
     List<Listing> findByUrgentTrue();

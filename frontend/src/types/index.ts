@@ -1,4 +1,4 @@
-﻿export interface User {
+export interface User {
   userId: string
   name: string
   role: Role
@@ -7,6 +7,18 @@
 }
 
 export type Role = 'STORE_MANAGER' | 'STORE_STAFF' | 'NGO' | 'CUSTOMER'
+
+export interface UserProfile {
+  id: string
+  name: string
+  email: string
+  role: Role
+  storeId?: string
+  notificationRadiusKm?: number
+  preferredCategories?: string[]
+  latitude?: number
+  longitude?: number
+}
 
 export interface Batch {
   id: string
@@ -69,6 +81,53 @@ export interface Order {
 }
 
 export type OrderStatus = 'RESERVED' | 'FULFILLED' | 'CANCELLED' | 'EXPIRED_HOLD'
+
+export interface NotificationItem {
+  id: string
+  userId: string
+  listingId?: string
+  type: 'NEW_DISCOUNT' | 'PRICE_DROP' | 'URGENT' | 'ORDER_CONFIRMED' | 'PICKUP_REMINDER'
+  message: string
+  read: boolean
+  createdAt: string
+}
+
+export interface Store {
+  id: string
+  name: string
+  managerId: string
+  address: string
+  phone?: string
+  location?: { type: string; coordinates: [number, number] }
+  averageRating: number
+  reviewCount: number
+  createdAt: string
+}
+
+export interface Review {
+  id: string
+  storeId: string
+  reviewerId: string
+  reviewerName: string
+  rating: number
+  comment: string
+  orderId?: string
+  createdAt: string
+}
+
+export interface StoreAnalytics {
+  storeId: string
+  storeName: string
+  totalBatches: number
+  activeBatches: number
+  expiredBatches: number
+  activeListings: number
+  totalOrders: number
+  fulfilledOrders: number
+  revenueRescued: number
+  wastePreventedKg: number
+  batchStateDistribution: Record<string, number>
+}
 
 export interface Toast {
   id: string

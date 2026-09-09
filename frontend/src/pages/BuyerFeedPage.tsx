@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { getNearbyListings, getUrgentListings } from "../api/listings"
 import type { Listing } from "../types"
 import ListingCard from "../components/listing/ListingCard"
@@ -7,6 +7,7 @@ import { SkeletonCard } from "../components/shared/Skeleton"
 import AppLayout from "../components/layout/AppLayout"
 
 const CATEGORIES = ["All", "Fruit", "Vegetable", "Dairy", "Bakery", "Meat", "Seafood", "Beverage", "Snack"]
+const TIERS = ["All", "TIER_1", "TIER_2", "TIER_3"]
 
 export default function BuyerFeedPage() {
   const [tab, setTab] = useState<"nearby" | "urgent">("nearby")
@@ -16,6 +17,11 @@ export default function BuyerFeedPage() {
   const [radius, setRadius] = useState(5)
   const [category, setCategory] = useState("All")
   const [search, setSearch] = useState("")
+  const [tierFilter, setTierFilter] = useState("All")
+  const [maxPrice, setMaxPrice] = useState<number>(1000)
+  const [minDiscount, setMinDiscount] = useState<number>(0)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
   const [reserving, setReserving] = useState<Listing | null>(null)
   const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null)
 
@@ -52,8 +58,13 @@ export default function BuyerFeedPage() {
 
   const filtered = listings.filter((l) => {
     const matchCat = category === "All" || l.category?.toLowerCase() === category.toLowerCase()
-    const matchSearch = !search || l.productName?.toLowerCase().includes(search.toLowerCase()) || l.storeName?.toLowerCase().includes(search.toLowerCase())
-    return matchCat && matchSearch
+    const matchSearch = !search ||
+      l.productName?.toLowerCase().includes(search.toLowerCase()) ||
+      l.storeName?.toLowerCase().includes(search.toLowerCase())
+    const matchTier = tierFilter === "All" || l.tier === tierFilter
+    const matchPrice = l.currentPrice <= maxPrice
+    const matchDiscount = l.discountPercent >= minDiscount
+    return matchCat && matchSearch && matchTier && matchPrice && matchDiscount
   })
 
   return (
@@ -64,13 +75,22 @@ export default function BuyerFeedPage() {
       </div>
 
       {/* Tabs */}
-      <div className="tabs" style={{ maxWidth: 320, marginBottom: 24 }}>
-        <button id="tab-nearby" className={`tab${tab === "nearby" ? " active" : ""}`} onClick={() => setTab("nearby")}>📍 Nearby</button>
-        <button id="tab-urgent" className={`tab${tab === "urgent" ? " active" : ""}`} onClick={() => setTab("urgent")}>🔥 Urgent</button>
+      <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
+        <div className="tabs" style={{ maxWidth: 320 }}>
+          <button id="tab-nearby" className={`tab${tab === "nearby" ? " active" : ""}`} onClick={() => setTab("nearby")}>📍 Nearby</button>
+          <button id="tab-urgent" className={`tab${tab === "urgent" ? " active" : ""}`} onClick={() => setTab("urgent")}>🔥 Urgent</button>
+        </div>
+
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+        >
+          {showAdvanced ? "▲ Hide Filters" : "⚙️ Advanced Filters"}
+        </button>
       </div>
 
-      {/* Filters */}
-      <div style={{ marginBottom: 24, display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Main Search & Distance */}
+      <div style={{ marginBottom: 20, display: "flex", flexDirection: "column", gap: 12 }}>
         <div className="filter-bar">
           <div className="search-input-wrapper">
             <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -79,7 +99,7 @@ export default function BuyerFeedPage() {
             <input
               id="search-listings"
               className="form-input"
-              placeholder="Search by product or store…"
+              placeholder="Search by product or store name…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -90,20 +110,87 @@ export default function BuyerFeedPage() {
               <span className="text-sm text-muted">Radius:</span>
               <input
                 id="radius-slider"
-                type="range" min={1} max={20} value={radius}
+                type="range" min={1} max={30} value={radius}
                 onChange={(e) => setRadius(Number(e.target.value))}
-                style={{ width: 100 }}
+                style={{ width: 90 }}
               />
               <span className="text-sm font-medium">{radius} km</span>
             </div>
           )}
         </div>
 
+        {/* Categories Bar */}
         <div className="filter-bar">
           {CATEGORIES.map((c) => (
-            <button key={c} className={`filter-chip${category === c ? " active" : ""}`} onClick={() => setCategory(c)}>{c}</button>
+            <button
+              key={c}
+              className={`filter-chip${category === c ? " active" : ""}`}
+              onClick={() => setCategory(c)}
+            >
+              {c}
+            </button>
           ))}
         </div>
+
+        {/* Advanced Filters Panel */}
+        {showAdvanced && (
+          <div className="card card-body" style={{ background: "var(--surface-2)", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+              <div>
+                <div className="flex justify-between text-xs font-semibold mb-2">
+                  <span>Max Price:</span>
+                  <span className="text-accent font-bold">₹{maxPrice}</span>
+                </div>
+                <input
+                  type="range"
+                  min={20}
+                  max={2000}
+                  step={20}
+                  value={maxPrice}
+                  onChange={(e) => setMaxPrice(Number(e.target.value))}
+                  className="w-full"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between text-xs font-semibold mb-2">
+                  <span>Min Discount:</span>
+                  <span className="text-accent font-bold">{minDiscount}%+</span>
+                </div>
+                <div className="flex gap-2">
+                  {[0, 20, 40, 50].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`filter-chip${minDiscount === d ? " active" : ""}`}
+                      onClick={() => setMinDiscount(d)}
+                      style={{ padding: "4px 10px", fontSize: "0.75rem" }}
+                    >
+                      {d === 0 ? "Any" : `${d}%+`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold mb-2">Urgency / Decay Tier:</div>
+                <div className="flex gap-2">
+                  {TIERS.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={`filter-chip${tierFilter === t ? " active" : ""}`}
+                      onClick={() => setTierFilter(t)}
+                      style={{ padding: "4px 10px", fontSize: "0.75rem" }}
+                    >
+                      {t.replace("_", " ")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Error */}
@@ -128,7 +215,7 @@ export default function BuyerFeedPage() {
               <div className="empty-state">
                 <div className="empty-state-icon">📦</div>
                 <div style={{ fontWeight: 600 }}>No listings found</div>
-                <div className="text-sm">Try expanding your radius or clearing filters.</div>
+                <div className="text-sm">Try expanding your radius or relaxing price/discount filters.</div>
               </div>
             </div>
           )
@@ -148,4 +235,3 @@ export default function BuyerFeedPage() {
     </AppLayout>
   )
 }
-

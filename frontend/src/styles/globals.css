@@ -1,4 +1,4 @@
-﻿/* FreshRescue Design System */
+/* FreshRescue Design System */
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap");
 
 :root {
@@ -245,3 +245,54 @@ input::placeholder{color:var(--text-subtle)}
 
 /* Freshness gauge */
 .freshness-ring{transform:rotate(-90deg);transform-origin:center}
+
+/* Theme Switcher */
+[data-theme="light"] {
+  --bg: #f6f8fa;
+  --surface: #ffffff;
+  --surface-2: #f0f3f6;
+  --surface-3: #e1e4e8;
+  --border: #d0d7de;
+  --border-hover: #8c959f;
+  --accent: #1a7f37;
+  --accent-dim: #2da44e;
+  --accent-glow: rgba(26,127,55,0.18);
+  --urgent: #cf222e;
+  --urgent-dim: #ffebe9;
+  --urgent-glow: rgba(207,34,46,0.18);
+  --text: #1f2328;
+  --text-muted: #57606a;
+  --text-subtle: #6e7781;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
+  --shadow: 0 4px 16px rgba(0,0,0,.1);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.15);
+}
+
+/* Notification & Rating Styles */
+.notif-badge{background:var(--urgent);color:#fff;font-size:0.7rem;font-weight:700;padding:2px 6px;border-radius:999px;margin-left:auto}
+.rating-stars{color:#f7c948;display:inline-flex;gap:2px}
+.star-btn{background:none;border:none;font-size:1.5rem;color:#6e7681;cursor:pointer;transition:transform 0.15s ease}
+.star-btn.active{color:#f7c948}
+.star-btn:hover{transform:scale(1.2)}
+
+/* Progress and Bar Chart */
+.bar-chart-row{display:flex;align-items:center;gap:12px;margin:8px 0}
+.bar-track{flex:1;height:12px;background:var(--surface-2);border-radius:6px;overflow:hidden;border:1px solid var(--border)}
+.bar-fill{height:100%;border-radius:6px;transition:width 0.5s ease}
+
+/* Print Slip Styles */
+@media print {
+  body * { visibility: hidden !important; }
+  .print-slip, .print-slip * { visibility: visible !important; }
+  .print-slip {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    padding: 32px;
+    background: #fff !important;
+    color: #000 !important;
+    z-index: 99999;
+  }
+}
