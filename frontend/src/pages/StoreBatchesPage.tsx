@@ -1,10 +1,11 @@
-﻿import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { useAuth } from "../context/AuthContext"
-import { getBatchesForStore } from "../api/batches"
+import { getMyBatches, getBatchesForStore } from "../api/batches"
 import { useNavigate } from "react-router-dom"
 import type { Batch } from "../types"
 import TierBadge from "../components/shared/TierBadge"
 import AppLayout from "../components/layout/AppLayout"
+import AddBatchModal from "../components/shared/AddBatchModal"
 
 const STATES = ["All", "FRESH", "TIER_1", "TIER_2", "TIER_3", "EXPIRED"]
 
@@ -15,15 +16,26 @@ export default function StoreBatchesPage() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState("All")
   const [search, setSearch] = useState("")
+  const [showAdd, setShowAdd] = useState(false)
   const storeId = user?.storeId ?? ""
 
   const fetchBatches = useCallback(async () => {
-    if (!storeId) return
     setLoading(true)
-    try { setBatches(await getBatchesForStore(storeId)) } catch {} finally { setLoading(false) }
+    try {
+      const data = await getMyBatches()
+      setBatches(data)
+    } catch {
+      if (storeId) {
+        try { setBatches(await getBatchesForStore(storeId)) } catch {}
+      }
+    } finally {
+      setLoading(false)
+    }
   }, [storeId])
 
-  useEffect(() => { fetchBatches() }, [fetchBatches])
+  useEffect(() => {
+    fetchBatches()
+  }, [fetchBatches])
 
   const filtered = batches.filter((b) => {
     const matchState = filter === "All" || b.state === filter
@@ -33,9 +45,14 @@ export default function StoreBatchesPage() {
 
   return (
     <AppLayout>
-      <div className="page-header">
-        <h1 className="page-title">All Batches 📦</h1>
-        <p className="page-subtitle">Complete inventory view for store <strong>{storeId || "—"}</strong></p>
+      <div className="page-header flex items-center justify-between" style={{ flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 className="page-title">All Batches 📦</h1>
+          <p className="page-subtitle">Complete inventory view for store <strong>{storeId || "Active Store"}</strong></p>
+        </div>
+        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
+          + Add Batch
+        </button>
       </div>
 
       <div className="filter-bar" style={{ marginBottom: 24 }}>
@@ -43,10 +60,20 @@ export default function StoreBatchesPage() {
           <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>
-          <input id="search-batches" className="form-input" placeholder="Search products…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input
+            id="search-batches"
+            className="form-input"
+            placeholder="Search products…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
         {STATES.map((s) => (
-          <button key={s} className={`filter-chip${filter === s ? " active" : ""}`} onClick={() => setFilter(s)}>
+          <button
+            key={s}
+            className={`filter-chip${filter === s ? " active" : ""}`}
+            onClick={() => setFilter(s)}
+          >
             {s === "All" ? "All" : s.replace("_", " ")}
           </button>
         ))}
@@ -67,6 +94,7 @@ export default function StoreBatchesPage() {
               <div className="empty-state">
                 <div className="empty-state-icon">📦</div>
                 <div style={{ fontWeight: 600 }}>No batches found</div>
+                <div className="text-sm">Click "+ Add Batch" to register your first produce batch.</div>
               </div>
             </div>
           )
@@ -97,7 +125,17 @@ export default function StoreBatchesPage() {
           ))
         }
       </div>
+
+      {showAdd && (
+        <AddBatchModal
+          storeId={storeId}
+          onClose={() => setShowAdd(false)}
+          onSaved={() => {
+            setShowAdd(false)
+            fetchBatches()
+          }}
+        />
+      )}
     </AppLayout>
   )
 }
-

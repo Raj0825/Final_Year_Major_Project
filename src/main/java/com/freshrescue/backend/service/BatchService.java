@@ -22,14 +22,26 @@ public class BatchService {
     private final NotificationService notificationService;
 
     public Batch createBatch(Batch batch) {
-        batch.setState(Batch.BatchState.FRESH);
-        // Guard against Lombok's @Builder.Default not applying when objects are created via
-        // Jackson (as @RequestBody does) rather than the builder - imageUrls would otherwise
-        // come back null and NPE the first time scanBatch() appends to it.
+        if (batch.getState() == null) {
+            batch.setState(Batch.BatchState.FRESH);
+        }
         if (batch.getImageUrls() == null) {
             batch.setImageUrls(new ArrayList<>());
         }
-        return batchRepository.save(batch);
+        if (batch.getStockedAt() == null) {
+            batch.setStockedAt(Instant.now());
+        }
+        if (batch.getCreatedAt() == null) {
+            batch.setCreatedAt(Instant.now());
+        }
+        if (batch.getUpdatedAt() == null) {
+            batch.setUpdatedAt(Instant.now());
+        }
+        Batch saved = batchRepository.save(batch);
+        if (saved.getState() != Batch.BatchState.FRESH && saved.getState() != Batch.BatchState.EXPIRED) {
+            listingService.syncListingForBatch(saved);
+        }
+        return saved;
     }
 
     /**

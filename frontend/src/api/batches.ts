@@ -1,14 +1,15 @@
-﻿import api from './client'
+import api from './client'
 import type { Batch } from '../types'
 
 export interface CreateBatchPayload {
-  storeId: string
+  storeId?: string
   productName: string
   category: string
   quantity: number
   unit: string
   stockedAt: string
   originalPrice: number
+  state?: string
 }
 
 export const createBatch = (data: CreateBatchPayload) =>
@@ -19,6 +20,9 @@ export const getBatch = (id: string) =>
 
 export const getBatchesForStore = (storeId: string) =>
   api.get<Batch[]>(`/batches/store/${storeId}`).then((r) => r.data)
+
+export const getMyBatches = () =>
+  api.get<Batch[]>('/batches/my-batches').then((r) => r.data)
 
 export const scanBatch = (id: string, image: File) => {
   const form = new FormData()

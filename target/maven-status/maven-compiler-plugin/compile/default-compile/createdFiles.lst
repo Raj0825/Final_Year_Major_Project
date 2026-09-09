@@ -1,5 +1,7 @@
 com\freshrescue\backend\controller\ListingController.class
 com\freshrescue\backend\entity\Review.class
 com\freshrescue\backend\service\ListingService.class
+com\freshrescue\backend\controller\BatchController.class
+com\freshrescue\backend\service\BatchService.class
 com\freshrescue\backend\service\BatchStateService$1.class
 com\freshrescue\backend\entity\Review$ReviewBuilder.class
