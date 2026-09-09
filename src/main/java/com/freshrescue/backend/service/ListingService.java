@@ -73,13 +73,14 @@ public class ListingService {
         }
 
         Listing listing = existing != null ? existing : Listing.builder()
-                .batchId(batch.getId())
-                .storeId(batch.getStoreId())
-                .productName(batch.getProductName())
-                .category(batch.getCategory())
-                .unit(batch.getUnit())
                 .listedAt(Instant.now())
                 .build();
+
+        listing.setBatchId(batch.getId());
+        listing.setStoreId(batch.getStoreId());
+        listing.setProductName(batch.getProductName());
+        listing.setCategory(batch.getCategory());
+        listing.setUnit(batch.getUnit());
 
         listing.setStoreName(storeName);
         if (storeLocation != null) {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react"
+import { useNavigate } from "react-router-dom"
 import { fulfillOrderByCode, getStoreOrders } from "../api/orders"
 import AppLayout from "../components/layout/AppLayout"
 import { useToast } from "../context/ToastContext"
@@ -7,6 +8,7 @@ import type { Order } from "../types"
 import OrderStatusBadge from "../components/shared/OrderStatusBadge"
 
 export default function StoreFulfillOrdersPage() {
+  const navigate = useNavigate()
   const { addToast } = useToast()
   const { user } = useAuth()
   const [code, setCode] = useState("")
@@ -119,16 +121,28 @@ export default function StoreFulfillOrdersPage() {
 
           {fulfilled && (
             <div className="alert alert-success" style={{ marginTop: 20 }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>✅ Pickup Complete!</div>
+              <div style={{ width: "100%" }}>
+                <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>✅ Pickup Complete & Stock Deducted!</div>
                 <div className="text-sm" style={{ marginTop: 4 }}>
-                  Order #{fulfilled.id.slice(-8)} · Quantity: {fulfilled.quantity} · Collected: ₹{fulfilled.priceAtOrder?.toFixed(2)}
+                  Order #{fulfilled.id.slice(-8)} · Fulfilled <strong>{fulfilled.quantity} units/kg</strong> · Collected: ₹{fulfilled.priceAtOrder?.toFixed(2)}
+                </div>
+                <div className="text-xs" style={{ marginTop: 4, color: "#166534" }}>
+                  📉 The batch quantity in your Store Dashboard has been reduced by <strong>{fulfilled.quantity}</strong>.
                 </div>
                 {fulfilled.fulfilledAt && (
                   <div className="text-xs text-muted" style={{ marginTop: 4 }}>
                     Timestamp: {new Date(fulfilled.fulfilledAt).toLocaleTimeString()}
                   </div>
                 )}
+                <div style={{ marginTop: 12 }}>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => navigate("/store/dashboard")}
+                    style={{ background: "#fff", borderColor: "#86efac", color: "#166534" }}
+                  >
+                    🏪 View Updated Stock in Dashboard →
+                  </button>
+                </div>
               </div>
             </div>
           )}

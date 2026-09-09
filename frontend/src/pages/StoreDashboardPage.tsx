@@ -52,12 +52,26 @@ export default function StoreDashboardPage() {
     fetchBatches()
   }, [fetchBatches])
 
+  // Automatically refresh when window gets focus or periodically
+  useEffect(() => {
+    const handleFocus = () => fetchBatches()
+    window.addEventListener("focus", handleFocus)
+    const interval = setInterval(() => {
+      fetchBatches()
+    }, 8000)
+    return () => {
+      window.removeEventListener("focus", handleFocus)
+      clearInterval(interval)
+    }
+  }, [fetchBatches])
+
   const stats = {
     total: batches.length,
     fresh: batches.filter((b) => b.state === "FRESH").length,
     discounted: batches.filter((b) => ["TIER_1","TIER_2","TIER_3"].includes(b.state)).length,
     review: batches.filter((b) => b.needsManualReview).length,
     expired: batches.filter((b) => b.state === "EXPIRED").length,
+    totalQty: Math.round(batches.reduce((sum, b) => sum + (b.quantity || 0), 0) * 10) / 10,
   }
 
   const [syncing, setSyncing] = useState(false)
@@ -85,7 +99,10 @@ export default function StoreDashboardPage() {
             Manage batches and track freshness for store <strong>{storeId || "Active Store"}</strong>
           </p>
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button className="btn btn-secondary" onClick={() => fetchBatches()} disabled={loading}>
+            {loading ? "Refreshing..." : "🔄 Refresh"}
+          </button>
           <button className="btn btn-secondary" onClick={handleSyncListings} disabled={syncing}>
             {syncing ? "Syncing..." : "🔄 Sync Listings"}
           </button>
@@ -99,7 +116,7 @@ export default function StoreDashboardPage() {
       <div className="grid-4" style={{ marginBottom: 32 }}>
         <div className="stat-card">
           <div className="stat-value">{stats.total}</div>
-          <div className="stat-label">Total Batches</div>
+          <div className="stat-label">Total Batches ({stats.totalQty} units in stock)</div>
         </div>
         <div className="stat-card">
           <div className="stat-value" style={{ color: "var(--tier-fresh)" }}>{stats.fresh}</div>
@@ -128,11 +145,11 @@ export default function StoreDashboardPage() {
           <thead>
             <tr>
               <th>Product</th><th>Category</th><th>State</th><th>Freshness</th>
-              <th>Qty</th><th>Discount</th><th>Stocked</th><th></th>
+              <th>Available Qty</th><th>Discount</th><th>Stocked</th><th></th>
             </tr>
           </thead>
           <tbody>
-            {loading ? (
+            {loading && batches.length === 0 ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <tr key={i}>
                   <td colSpan={8}><div className="skeleton" style={{ height: 32, borderRadius: 4 }} /></td>
@@ -162,7 +179,21 @@ export default function StoreDashboardPage() {
                       <span className="text-muted">—</span>
                     )}
                   </td>
-                  <td>{b.quantity} {b.unit}</td>
+                  <td>
+                    <div style={{ fontWeight: 600, fontSize: "0.95rem" }}>
+                      {b.quantity} {b.unit}
+                    </div>
+                    {b.quantityReserved != null && b.quantityReserved > 0 && (
+                      <div className="text-xs" style={{ color: "#d97706", fontWeight: 600, marginTop: 2 }}>
+                        ⏳ {b.quantityReserved} {b.unit} reserved
+                      </div>
+                    )}
+                    {b.quantity <= 0 && (
+                      <div className="text-xs" style={{ color: "var(--urgent)", fontWeight: 600, marginTop: 2 }}>
+                        Out of stock
+                      </div>
+                    )}
+                  </td>
                   <td>{b.currentDiscountPercent ? `-${b.currentDiscountPercent}%` : "—"}</td>
                   <td className="text-sm text-muted">{new Date(b.stockedAt).toLocaleDateString()}</td>
                   <td>

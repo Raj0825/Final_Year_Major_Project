@@ -38,6 +38,18 @@ export default function StoreBatchesPage() {
     fetchBatches()
   }, [fetchBatches])
 
+  useEffect(() => {
+    const handleFocus = () => fetchBatches()
+    window.addEventListener("focus", handleFocus)
+    const interval = setInterval(() => {
+      fetchBatches()
+    }, 8000)
+    return () => {
+      window.removeEventListener("focus", handleFocus)
+      clearInterval(interval)
+    }
+  }, [fetchBatches])
+
   const filtered = batches.filter((b) => {
     const matchState = filter === "All" || b.state === filter
     const matchSearch = !search || b.productName.toLowerCase().includes(search.toLowerCase())
@@ -122,9 +134,21 @@ export default function StoreBatchesPage() {
               </div>
               <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>{b.productName}</div>
               <div className="text-sm text-muted" style={{ marginBottom: 10 }}>{b.category}</div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted">Quantity</span>
-                <span>{b.quantity} {b.unit}</span>
+              <div className="flex justify-between text-sm items-start">
+                <span className="text-muted">Available Stock</span>
+                <div style={{ textAlign: "right" }}>
+                  <span style={{ fontWeight: 600 }}>{b.quantity} {b.unit}</span>
+                  {b.quantityReserved != null && b.quantityReserved > 0 && (
+                    <div className="text-xs" style={{ color: "#d97706", fontWeight: 600 }}>
+                      ⏳ {b.quantityReserved} {b.unit} reserved
+                    </div>
+                  )}
+                  {b.quantity <= 0 && (
+                    <div className="text-xs" style={{ color: "var(--urgent)", fontWeight: 600 }}>
+                      Out of stock
+                    </div>
+                  )}
+                </div>
               </div>
               {b.freshnessScore != null && (
                 <div className="flex justify-between text-sm" style={{ marginTop: 6 }}>
