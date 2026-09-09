@@ -21,3 +21,6 @@ export const getMyOrders = () =>
 
 export const getStoreOrders = (storeId?: string) =>
   api.get<Order[]>(storeId ? `/orders/store/${storeId}` : '/orders/store').then((r) => r.data)
+
+export const getPendingStoreOrders = () =>
+  api.get<Order[]>('/orders/store/pending').then((r) => r.data)

@@ -69,6 +69,8 @@ export interface Order {
   listingId: string
   batchId: string
   storeId: string
+  productName?: string
+  unit?: string
   buyerId: string
   buyerType: 'NGO' | 'CUSTOMER'
   quantity: number

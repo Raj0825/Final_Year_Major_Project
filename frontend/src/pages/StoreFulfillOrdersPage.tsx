@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
-import { fulfillOrderByCode, getStoreOrders } from "../api/orders"
+import { fulfillOrderByCode, getStoreOrders, getPendingStoreOrders } from "../api/orders"
 import AppLayout from "../components/layout/AppLayout"
 import { useToast } from "../context/ToastContext"
 import { useAuth } from "../context/AuthContext"
@@ -18,12 +18,16 @@ export default function StoreFulfillOrdersPage() {
   const [loadingOrders, setLoadingOrders] = useState(true)
 
   const loadOrders = useCallback(async () => {
-    setLoadingOrders(true)
     try {
-      const orders = await getStoreOrders(user?.storeId)
-      setPendingOrders(orders.filter((o) => o.status === "RESERVED"))
+      // 1. Fetch pending orders using comprehensive manager batch & store resolver
+      const orders = await getPendingStoreOrders()
+      setPendingOrders(orders)
     } catch {
       // Fallback
+      try {
+        const fallback = await getStoreOrders(user?.storeId)
+        setPendingOrders(fallback.filter((o) => o.status === "RESERVED"))
+      } catch {}
     } finally {
       setLoadingOrders(false)
     }
@@ -31,6 +35,13 @@ export default function StoreFulfillOrdersPage() {
 
   useEffect(() => {
     loadOrders()
+    const handleFocus = () => loadOrders()
+    window.addEventListener("focus", handleFocus)
+    const interval = setInterval(loadOrders, 5000)
+    return () => {
+      window.removeEventListener("focus", handleFocus)
+      clearInterval(interval)
+    }
   }, [loadOrders])
 
   const handlePasteClipboard = async () => {
@@ -197,7 +208,7 @@ export default function StoreFulfillOrdersPage() {
               <thead>
                 <tr>
                   <th>Order ID</th>
-                  <th>Status</th>
+                  <th>Product</th>
                   <th>Quantity</th>
                   <th>Total Price</th>
                   <th>Reserved At</th>
@@ -214,8 +225,15 @@ export default function StoreFulfillOrdersPage() {
                         QR: {o.qrCode ? o.qrCode.slice(0, 8) + "..." : "—"}
                       </div>
                     </td>
-                    <td><OrderStatusBadge status={o.status} /></td>
-                    <td><strong>{o.quantity}</strong></td>
+                    <td>
+                      <div className="font-semibold" style={{ fontSize: "0.95rem" }}>
+                        {o.productName ? `${o.productName} 🍎` : `Produce #${o.id.slice(-6)}`}
+                      </div>
+                      <div className="text-xs text-muted">Store: {o.storeId || "Active"}</div>
+                    </td>
+                    <td>
+                      <strong>{o.quantity} {o.unit || "units"}</strong>
+                    </td>
                     <td><strong className="text-accent">₹{o.priceAtOrder?.toFixed(2)}</strong></td>
                     <td className="text-xs text-muted">{new Date(o.reservedAt).toLocaleTimeString()}</td>
                     <td className="text-xs" style={{ color: "var(--urgent)", fontWeight: 600 }}>

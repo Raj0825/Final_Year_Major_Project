@@ -77,6 +77,8 @@ public class OrderService {
                 .listingId(listingId)
                 .batchId(resolvedBatchId)
                 .storeId(updatedListing.getStoreId())
+                .productName(updatedListing.getProductName())
+                .unit(updatedListing.getUnit())
                 .buyerId(buyerId)
                 .buyerType(buyerType)
                 .quantity(quantity)

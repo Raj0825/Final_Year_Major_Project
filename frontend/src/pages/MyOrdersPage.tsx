@@ -40,14 +40,18 @@ export default function MyOrdersPage() {
       setLoading(true)
       const data = await getMyOrders()
       if (data && data.length > 0) {
-        setOrders(data)
+        // Guarantee newest booking is strictly on top
+        const sorted = [...data].sort((a, b) => new Date(b.reservedAt || 0).getTime() - new Date(a.reservedAt || 0).getTime())
+        setOrders(sorted)
       } else {
         // Fallback to local session storage if available
-        const local = JSON.parse(sessionStorage.getItem("my_orders") ?? "[]")
+        const local: Order[] = JSON.parse(sessionStorage.getItem("my_orders") ?? "[]")
+        local.sort((a, b) => new Date(b.reservedAt || 0).getTime() - new Date(a.reservedAt || 0).getTime())
         setOrders(local)
       }
     } catch {
-      const local = JSON.parse(sessionStorage.getItem("my_orders") ?? "[]")
+      const local: Order[] = JSON.parse(sessionStorage.getItem("my_orders") ?? "[]")
+      local.sort((a, b) => new Date(b.reservedAt || 0).getTime() - new Date(a.reservedAt || 0).getTime())
       setOrders(local)
     } finally {
       setLoading(false)
@@ -56,6 +60,13 @@ export default function MyOrdersPage() {
 
   useEffect(() => {
     loadOrders()
+    const handleFocus = () => loadOrders()
+    window.addEventListener("focus", handleFocus)
+    const interval = setInterval(loadOrders, 10000)
+    return () => {
+      window.removeEventListener("focus", handleFocus)
+      clearInterval(interval)
+    }
   }, [])
 
   const handlePrint = (order: Order) => {
@@ -110,11 +121,14 @@ export default function MyOrdersPage() {
                   <OrderStatusBadge status={o.status} />
                   <span className="text-sm text-muted">Order #{o.id ? o.id.slice(-8) : "N/A"}</span>
                 </div>
-                <div className="font-bold" style={{ fontSize: "1.05rem" }}>
-                  Store ID: {o.storeId || "Local Store"}
+                <div className="font-bold" style={{ fontSize: "1.15rem", color: "var(--text-main)" }}>
+                  {o.productName ? `${o.productName} 🍎` : `Produce Batch #${o.batchId ? o.batchId.slice(-6) : "Rescue"}`}
                 </div>
-                <div className="text-sm text-muted" style={{ marginTop: 4 }}>
-                  Qty: <strong>{o.quantity}</strong> · Price: <strong className="text-accent">₹{o.priceAtOrder?.toFixed(2)}</strong>
+                <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                  Store: <strong>{o.storeId || "Local Store"}</strong>
+                </div>
+                <div className="text-sm" style={{ marginTop: 6 }}>
+                  Qty: <strong>{o.quantity} {o.unit || "kg/units"}</strong> · Total Price: <strong className="text-accent">₹{o.priceAtOrder?.toFixed(2)}</strong>
                 </div>
                 <div className="text-xs text-muted" style={{ marginTop: 4 }}>
                   Reserved: {new Date(o.reservedAt).toLocaleString()}

@@ -29,6 +29,8 @@ public class Order {
     private String listingId;
     private String batchId;
     private String storeId;
+    private String productName;
+    private String unit;
 
     private String buyerId;
     private BuyerType buyerType;
