@@ -1,0 +1,21 @@
+# Maven
+target/
+*.class
+
+# Node / Frontend
+node_modules/
+dist/
+.vite/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.DS_Store
