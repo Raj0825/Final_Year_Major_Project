@@ -19,7 +19,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const data = await login({ email, password })
-      authLogin({ userId: data.userId, name: data.name, role: data.role as any, token: data.token })
+      authLogin({ userId: data.userId, name: data.name, role: data.role as any, token: data.token, storeId: data.storeId })
       addToast(`Welcome back, ${data.name}!`, "success")
       if (data.role === "STORE_MANAGER" || data.role === "STORE_STAFF") {
         navigate("/store/dashboard")

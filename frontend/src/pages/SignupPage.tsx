@@ -37,7 +37,7 @@ export default function SignupPage() {
     setLoading(true)
     try {
       const data = await signup({ name, email, password, role, storeId: needsStoreId ? storeId : undefined })
-      authLogin({ userId: data.userId, name: data.name, role: data.role as Role, token: data.token })
+      authLogin({ userId: data.userId, name: data.name, role: data.role as Role, token: data.token, storeId: data.storeId })
       addToast(`Account created! Welcome, ${data.name} 🌿`, "success")
       if (data.role === "STORE_MANAGER" || data.role === "STORE_STAFF") {
         navigate("/store/dashboard")

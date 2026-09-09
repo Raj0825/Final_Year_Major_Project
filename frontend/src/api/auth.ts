@@ -18,6 +18,7 @@ export interface AuthResponse {
   userId: string
   name: string
   role: string
+  storeId?: string   // present for STORE_MANAGER / STORE_STAFF
 }
 
 export const signup = (data: SignupRequest) =>

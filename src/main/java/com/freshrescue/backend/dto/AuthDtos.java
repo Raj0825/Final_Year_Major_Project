@@ -23,6 +23,7 @@ public class AuthDtos {
             String token,
             String userId,
             String name,
-            User.Role role
+            User.Role role,
+            String storeId  // null for NGO/CUSTOMER roles
     ) {}
 }
