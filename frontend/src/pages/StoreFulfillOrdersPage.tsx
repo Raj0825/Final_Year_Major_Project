@@ -1,106 +1,228 @@
-﻿import React, { useState } from "react"
-import { fulfillOrder } from "../api/orders"
+import React, { useState, useEffect, useCallback } from "react"
+import { fulfillOrderByCode, getStoreOrders } from "../api/orders"
 import AppLayout from "../components/layout/AppLayout"
 import { useToast } from "../context/ToastContext"
+import { useAuth } from "../context/AuthContext"
 import type { Order } from "../types"
+import OrderStatusBadge from "../components/shared/OrderStatusBadge"
 
 export default function StoreFulfillOrdersPage() {
   const { addToast } = useToast()
-  const [orderId, setOrderId] = useState("")
-  const [qrCode, setQrCode] = useState("")
+  const { user } = useAuth()
+  const [code, setCode] = useState("")
   const [loading, setLoading] = useState(false)
   const [fulfilled, setFulfilled] = useState<Order | null>(null)
+  const [pendingOrders, setPendingOrders] = useState<Order[]>([])
+  const [loadingOrders, setLoadingOrders] = useState(true)
 
-  async function handleFulfill(e: React.FormEvent) {
-    e.preventDefault()
-    if (!orderId.trim() || !qrCode.trim()) return
+  const loadOrders = useCallback(async () => {
+    setLoadingOrders(true)
+    try {
+      const orders = await getStoreOrders(user?.storeId)
+      setPendingOrders(orders.filter((o) => o.status === "RESERVED"))
+    } catch {
+      // Fallback
+    } finally {
+      setLoadingOrders(false)
+    }
+  }, [user?.storeId])
+
+  useEffect(() => {
+    loadOrders()
+  }, [loadOrders])
+
+  const handlePasteClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (text) {
+        setCode(text.trim())
+        addToast("Pasted from clipboard!", "info")
+      }
+    } catch (err: any) {
+      addToast("Clipboard permission required or unavailable", "error")
+    }
+  }
+
+  async function executeFulfill(targetCode: string) {
+    if (!targetCode.trim()) return
     setLoading(true)
     try {
-      const result = await fulfillOrder(orderId, qrCode)
+      const result = await fulfillOrderByCode(targetCode.trim())
       setFulfilled(result)
-      addToast("Order fulfilled successfully! ✅", "success")
-      setOrderId("")
-      setQrCode("")
+      addToast(`Order #${result.id.slice(-8)} fulfilled successfully! 🎉`, "success")
+      setCode("")
+      loadOrders()
     } catch (err: any) {
       const msg = err.response?.data?.message ?? err.response?.data ?? "Fulfillment failed"
       addToast(typeof msg === "string" ? msg : "Invalid QR code or order ID", "error")
-    } finally { setLoading(false) }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleFormSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    executeFulfill(code)
   }
 
   return (
     <AppLayout>
       <div className="page-header">
         <h1 className="page-title">Fulfill Orders 📦</h1>
-        <p className="page-subtitle">Enter the order ID and scan the customer&apos;s QR code to complete pickup.</p>
+        <p className="page-subtitle">Scan, paste the customer&apos;s pickup QR code, or fulfill directly from the pending list.</p>
       </div>
 
-      <div style={{ maxWidth: 520 }}>
-        <div className="card card-body" style={{ marginBottom: 24 }}>
-          <h3 style={{ fontWeight: 700, marginBottom: 20 }}>Scan QR Code</h3>
-          <form onSubmit={handleFulfill} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 24, marginBottom: 32 }}>
+        {/* Left: QR / Code Scanner & Input */}
+        <div className="card card-body">
+          <h3 style={{ fontWeight: 700, fontSize: "1.1rem", marginBottom: 16 }}>
+            🔍 Scan or Paste Pickup Code
+          </h3>
+
+          <form onSubmit={handleFormSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div className="form-group">
-              <label className="form-label">Order ID</label>
-              <input
-                id="fulfill-order-id"
-                className="form-input"
-                placeholder="Enter order ID"
-                value={orderId}
-                onChange={(e) => setOrderId(e.target.value)}
-                required
-              />
+              <label className="form-label">QR Code Value or Order ID</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  id="fulfill-code-input"
+                  className="form-input"
+                  placeholder="Paste QR UUID or Order ID here..."
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  style={{ flex: 1 }}
+                  required
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handlePasteClipboard}
+                  title="Paste from clipboard"
+                  style={{ flexShrink: 0 }}
+                >
+                  📋 Paste
+                </button>
+              </div>
+              <span className="text-xs text-muted" style={{ marginTop: 6 }}>
+                Accepts any scanned QR code string or short/full Order ID.
+              </span>
             </div>
-            <div className="form-group">
-              <label className="form-label">QR Code Value</label>
-              <input
-                id="fulfill-qr-code"
-                className="form-input"
-                placeholder="Scan or paste QR code"
-                value={qrCode}
-                onChange={(e) => setQrCode(e.target.value)}
-                required
-              />
-              <span className="text-xs text-muted">Use a barcode scanner or manually paste the code value.</span>
-            </div>
-            <button id="fulfill-submit" className="btn btn-primary btn-lg" type="submit" disabled={loading}>
-              {loading ? <span className="spinner" /> : "✓ Mark as Fulfilled"}
+
+            <button
+              id="fulfill-submit"
+              className="btn btn-primary btn-lg w-full"
+              type="submit"
+              disabled={loading || !code.trim()}
+            >
+              {loading ? <span className="spinner" /> : "✓ Verify & Mark Fulfilled"}
             </button>
           </form>
+
+          {fulfilled && (
+            <div className="alert alert-success" style={{ marginTop: 20 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>✅ Pickup Complete!</div>
+                <div className="text-sm" style={{ marginTop: 4 }}>
+                  Order #{fulfilled.id.slice(-8)} · Quantity: {fulfilled.quantity} · Collected: ₹{fulfilled.priceAtOrder?.toFixed(2)}
+                </div>
+                {fulfilled.fulfilledAt && (
+                  <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+                    Timestamp: {new Date(fulfilled.fulfilledAt).toLocaleTimeString()}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
-        {fulfilled && (
-          <div className="alert alert-success">
-            <div>
-              <div style={{ fontWeight: 700 }}>Order fulfilled!</div>
-              <div className="text-sm" style={{ marginTop: 4 }}>
-                Order #{fulfilled.id.slice(-8)} · {fulfilled.quantity} items · ₹{fulfilled.priceAtOrder.toFixed(2)}
-              </div>
-              {fulfilled.fulfilledAt && (
-                <div className="text-sm" style={{ marginTop: 4 }}>
-                  At: {new Date(fulfilled.fulfilledAt).toLocaleString()}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        <div className="card card-body" style={{ marginTop: 24 }}>
-          <h3 style={{ fontWeight: 700, marginBottom: 12 }}>How it works</h3>
+        {/* Right: How pickup works */}
+        <div className="card card-body">
+          <h3 style={{ fontWeight: 700, fontSize: "1.1rem", marginBottom: 16 }}>
+            📋 Pickup Instructions
+          </h3>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {[
-              { icon: "1️⃣", text: "Customer reserves a listing and receives a QR code." },
-              { icon: "2️⃣", text: "Customer arrives at the store within the 15-minute hold window." },
-              { icon: "3️⃣", text: "Staff enters the order ID + scans/pastes the QR code above." },
-              { icon: "4️⃣", text: "Order is marked fulfilled and inventory updated automatically." },
+              { icon: "📱", text: "Customer presents the QR code on their phone or printable pickup slip." },
+              { icon: "⚡", text: "Scan with a handheld barcode scanner, or paste the QR code string into the box." },
+              { icon: "✅", text: "Click 'Verify & Mark Fulfilled' (or click 'Fulfill' in the pending table below)." },
+              { icon: "📦", text: "Hand over the rescued food items to the customer!" },
             ].map(({ icon, text }) => (
-              <div key={icon} className="flex gap-3 items-center">
-                <span style={{ fontSize: "1.2rem" }}>{icon}</span>
+              <div key={text} className="flex gap-3 items-center">
+                <span style={{ fontSize: "1.3rem" }}>{icon}</span>
                 <span className="text-sm text-muted">{text}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
+
+      {/* Pending Pickup Orders Table */}
+      <div className="card card-body">
+        <div className="flex items-center justify-between mb-4" style={{ flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <h3 style={{ fontWeight: 700, fontSize: "1.1rem" }}>
+              ⏳ Pending Reservations ({pendingOrders.length})
+            </h3>
+            <p className="text-xs text-muted">Customers currently holding orders for pickup at your store.</p>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={loadOrders}>
+            🔄 Refresh List
+          </button>
+        </div>
+
+        {loadingOrders ? (
+          <div style={{ textAlign: "center", padding: 32 }} className="text-muted">Loading orders...</div>
+        ) : pendingOrders.length === 0 ? (
+          <div className="empty-state" style={{ padding: 36 }}>
+            <div className="empty-state-icon">🎉</div>
+            <div style={{ fontWeight: 600 }}>No pending reservations</div>
+            <div className="text-sm">All customer reservations have been fulfilled or expired.</div>
+          </div>
+        ) : (
+          <div className="table-wrapper">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Order ID</th>
+                  <th>Status</th>
+                  <th>Quantity</th>
+                  <th>Total Price</th>
+                  <th>Reserved At</th>
+                  <th>Hold Expires</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingOrders.map((o) => (
+                  <tr key={o.id}>
+                    <td>
+                      <div className="font-semibold">#{o.id.slice(-8)}</div>
+                      <div className="text-xs text-muted truncate" style={{ maxWidth: 120 }}>
+                        QR: {o.qrCode ? o.qrCode.slice(0, 8) + "..." : "—"}
+                      </div>
+                    </td>
+                    <td><OrderStatusBadge status={o.status} /></td>
+                    <td><strong>{o.quantity}</strong></td>
+                    <td><strong className="text-accent">₹{o.priceAtOrder?.toFixed(2)}</strong></td>
+                    <td className="text-xs text-muted">{new Date(o.reservedAt).toLocaleTimeString()}</td>
+                    <td className="text-xs" style={{ color: "var(--urgent)", fontWeight: 600 }}>
+                      {new Date(o.holdExpiresAt).toLocaleTimeString()}
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => executeFulfill(o.qrCode || o.id)}
+                        disabled={loading}
+                      >
+                        ✓ Fulfill
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </AppLayout>
   )
 }
-

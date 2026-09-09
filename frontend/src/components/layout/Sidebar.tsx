@@ -102,7 +102,7 @@ export default function Sidebar() {
           <NavLink to="/store/analytics" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}>
             <IconAnalytics /> Analytics & ESG
           </NavLink>
-          {user?.role === 'STORE_MANAGER' && (
+          {user?.role === 'STORE_MANAGER' && !user?.storeId && (
             <NavLink to="/store/register" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}>
               <IconStore /> Register Store
             </NavLink>

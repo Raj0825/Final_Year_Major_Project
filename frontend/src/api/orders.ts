@@ -6,9 +6,14 @@ export const reserveListing = (listingId: string, quantity: number) =>
     .post<Order>('/orders/reserve', { listingId, quantity })
     .then((r) => r.data)
 
-export const fulfillOrder = (orderId: string, qrCode: string) =>
+export const fulfillOrder = (orderId: string, qrCode?: string) =>
   api
-    .post<Order>(`/orders/${orderId}/fulfill`, { qrCode })
+    .post<Order>(`/orders/${orderId}/fulfill`, { qrCode: qrCode || orderId })
+    .then((r) => r.data)
+
+export const fulfillOrderByCode = (code: string) =>
+  api
+    .post<Order>('/orders/fulfill-code', { code })
     .then((r) => r.data)
 
 export const getMyOrders = () =>

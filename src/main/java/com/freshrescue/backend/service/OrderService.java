@@ -77,20 +77,42 @@ public class OrderService {
         return orderRepository.save(order);
     }
 
-    /** Store staff scans the QR at pickup - finalizes the sale. */
+    /** Store staff scans the QR or enters Order ID at pickup - finalizes the sale. */
     public Order fulfill(String orderId, String scannedQrCode, String staffStoreId) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderId));
+        return fulfillByCodeOrId(scannedQrCode != null && !scannedQrCode.isBlank() ? scannedQrCode : orderId, staffStoreId);
+    }
 
-        if (staffStoreId != null && !staffStoreId.equals(order.getStoreId())) {
-            throw new org.springframework.security.access.AccessDeniedException(
-                    "Order " + orderId + " does not belong to your store");
+    public Order fulfillByCodeOrId(String code, String staffStoreId) {
+        if (code == null || code.isBlank()) {
+            throw new IllegalArgumentException("QR code or Order ID is required");
         }
-        if (!order.getQrCode().equals(scannedQrCode)) {
-            throw new IllegalArgumentException("QR code does not match this order");
+        String cleanCode = code.trim();
+
+        // 1. Try finding by exact qrCode, then by order ID
+        Order order = orderRepository.findByQrCode(cleanCode)
+                .or(() -> orderRepository.findById(cleanCode))
+                .orElse(null);
+
+        // 2. If not found, search among reserved orders for partial match
+        if (order == null) {
+            List<Order> allReserved = orderRepository.findAll().stream()
+                    .filter(o -> o.getStatus() == Order.OrderStatus.RESERVED)
+                    .toList();
+
+            for (Order o : allReserved) {
+                if (o.getId().endsWith(cleanCode) || o.getQrCode().equalsIgnoreCase(cleanCode)) {
+                    order = o;
+                    break;
+                }
+            }
         }
+
+        if (order == null) {
+            throw new IllegalArgumentException("No pending reservation found matching code: " + cleanCode);
+        }
+
         if (order.getStatus() != Order.OrderStatus.RESERVED) {
-            throw new IllegalStateException("Order is not in a fulfillable state: " + order.getStatus());
+            throw new IllegalStateException("Order is already " + order.getStatus());
         }
 
         order.setStatus(Order.OrderStatus.FULFILLED);

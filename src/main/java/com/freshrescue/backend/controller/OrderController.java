@@ -57,10 +57,20 @@ public class OrderController {
         return orderService.reserve(request.listingId(), buyerId, buyerType, request.quantity());
     }
 
+    public record FulfillCodeRequest(String code) {}
+
+    @PostMapping("/fulfill-code")
+    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
+    public Order fulfillByCode(@RequestBody FulfillCodeRequest request, Authentication auth) {
+        String staffStoreId = (String) auth.getDetails();
+        return orderService.fulfillByCodeOrId(request.code(), staffStoreId);
+    }
+
     @PostMapping("/{id}/fulfill")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
-    public Order fulfill(@PathVariable String id, @RequestBody FulfillRequest request, Authentication auth) {
-        String staffStoreId = (String) auth.getDetails(); // set by JwtAuthFilter from the JWT's storeId claim
-        return orderService.fulfill(id, request.qrCode(), staffStoreId);
+    public Order fulfill(@PathVariable String id, @RequestBody(required = false) FulfillRequest request, Authentication auth) {
+        String staffStoreId = (String) auth.getDetails();
+        String code = (request != null && request.qrCode() != null && !request.qrCode().isBlank()) ? request.qrCode() : id;
+        return orderService.fulfillByCodeOrId(code, staffStoreId);
     }
 }

@@ -11,7 +11,12 @@ public class AuthDtos {
             @Email @NotBlank String email,
             @NotBlank String password,
             User.Role role,
-            String storeId // required if role is STORE_MANAGER / STORE_STAFF
+            String storeId, // for existing store
+            String storeName, // for registering new store during signup
+            String storeAddress,
+            String storePhone,
+            Double latitude,
+            Double longitude
     ) {}
 
     public record LoginRequest(

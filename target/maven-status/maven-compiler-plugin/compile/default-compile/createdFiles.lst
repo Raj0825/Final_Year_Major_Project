@@ -1,6 +1,10 @@
 com\freshrescue\backend\controller\ListingController.class
 com\freshrescue\backend\entity\Review.class
 com\freshrescue\backend\service\ListingService.class
+com\freshrescue\backend\service\OrderService.class
+com\freshrescue\backend\dto\AuthDtos.class
+com\freshrescue\backend\controller\OrderController.class
+com\freshrescue\backend\service\AuthService.class
 com\freshrescue\backend\controller\BatchController.class
 com\freshrescue\backend\service\BatchService.class
 com\freshrescue\backend\service\BatchStateService$1.class

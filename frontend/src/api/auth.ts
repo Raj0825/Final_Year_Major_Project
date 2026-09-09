@@ -1,4 +1,4 @@
-﻿import api from './client'
+import api from './client'
 
 export interface SignupRequest {
   name: string
@@ -6,6 +6,11 @@ export interface SignupRequest {
   password: string
   role: string
   storeId?: string
+  storeName?: string
+  storeAddress?: string
+  storePhone?: string
+  latitude?: number
+  longitude?: number
 }
 
 export interface LoginRequest {
