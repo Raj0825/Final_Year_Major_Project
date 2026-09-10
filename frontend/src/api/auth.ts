@@ -29,5 +29,7 @@ export interface AuthResponse {
 export const signup = (data: SignupRequest) =>
   api.post<AuthResponse>('/auth/signup', data).then((r) => r.data)
 
+export const register = signup
+
 export const login = (data: LoginRequest) =>
   api.post<AuthResponse>('/auth/login', data).then((r) => r.data)
