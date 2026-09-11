@@ -166,7 +166,9 @@ export default function MyOrdersPage() {
                     <QRCodeSVG value={o.qrCode} size={110} />
                   </div>
                   <span className="text-xs text-muted">Show at counter</span>
+                  {o.holdExpiresAt && <CountdownTimer expiresAt={o.holdExpiresAt} />}
                 </div>
+              )}
               )}
             </div>
           ))}
