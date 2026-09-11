@@ -28,7 +28,7 @@ public class Store {
     private String phone;
 
     @GeoSpatialIndexed(type = GeoSpatialIndexType.GEO_2DSPHERE)
-    private GeoJsonPoint location; // [longitude, latitude]
+    private GeoJsonPoint location;
 
     @Builder.Default
     private double averageRating = 0.0;

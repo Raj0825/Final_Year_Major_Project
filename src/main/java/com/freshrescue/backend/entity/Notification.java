@@ -19,8 +19,8 @@ public class Notification {
     @Id
     private String id;
 
-    private String userId;      // recipient
-    private String listingId;   // what triggered it
+    private String userId;
+    private String listingId;
     private NotificationType type;
     private String message;
 

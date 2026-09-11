@@ -41,7 +41,7 @@ public class Order {
     @Builder.Default
     private OrderStatus status = OrderStatus.RESERVED;
 
-    private String qrCode; // generated on RESERVED, scanned by store staff to mark FULFILLED
+    private String qrCode;
 
     private Instant reservedAt;
     private Instant holdExpiresAt;

@@ -49,9 +49,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                         null,
                         List.of(new SimpleGrantedAuthority("ROLE_" + role))
                 );
-                // storeId is carried in "details" so controllers/services can enforce
-                // that store staff only touch their own store's data (see BatchController,
-                // OrderController#fulfill).
+
                 authentication.setDetails(storeId);
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }

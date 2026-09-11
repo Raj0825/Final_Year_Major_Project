@@ -33,36 +33,36 @@ public class Batch {
 
     private String storeId;
     private String managerId;
-    private String productName;   // e.g. "Banana"
-    private String category;      // e.g. "Fruit"
+    private String productName;
+    private String category;
 
-    private double quantity;      // in kg or units, see unit field
-    private String unit;          // "kg" | "unit"
+    private double quantity;
+    private String unit;
 
     private Instant stockedAt;
 
-    private double originalPrice;   // price per unit/kg before any freshness discount is applied
+    private double originalPrice;
 
     @Builder.Default
-    private List<String> imageUrls = new ArrayList<>(); // each rescan appends a new image
+    private List<String> imageUrls = new ArrayList<>();
 
-    // --- Fields written by the ML pipeline (see MlPredictionService) ---
-    private Double freshnessScore;        // 0.0 (spoiled) - 1.0 (fresh), latest CNN output
-    private Instant predictedExpiryDate;  // CNN estimate
-    private String ocrExtractedDate;      // raw text OCR pulled off any printed label, for cross-check
 
-    // Set when the ML service call fails so staff can rescan/verify manually instead of the
-    // batch silently being pushed through the normal discount pipeline with a guessed score.
+    private Double freshnessScore;
+    private Instant predictedExpiryDate;
+    private String ocrExtractedDate;
+
+
+
     @Builder.Default
     private boolean needsManualReview = false;
 
-    // --- State machine fields (see BatchStateService) ---
+
     @Builder.Default
     private BatchState state = BatchState.FRESH;
     private Integer currentDiscountPercent;
 
     @Builder.Default
-    private double quantityReserved = 0; // held by RESERVED orders, not yet fulfilled or cancelled
+    private double quantityReserved = 0;
 
     @CreatedDate
     private Instant createdAt;

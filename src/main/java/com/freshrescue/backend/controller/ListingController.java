@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/** Buyer App feed - public, no auth required to browse (see SecurityConfig). */
+
 @RestController
 @RequestMapping("/api/listings")
 @RequiredArgsConstructor

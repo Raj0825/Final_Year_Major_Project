@@ -22,8 +22,8 @@ public class Review {
     private String storeId;
     private String reviewerId;
     private String reviewerName;
-    private int rating; // 1-5
+    private int rating;
     private String comment;
-    private String orderId; // optional link to verified order
+    private String orderId;
     private Instant createdAt;
 }

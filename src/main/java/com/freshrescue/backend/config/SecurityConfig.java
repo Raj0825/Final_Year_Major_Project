@@ -39,7 +39,6 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        // Allow all localhost ports for local development (5173, 5174, 3000, etc.)
         config.setAllowedOriginPatterns(List.of("http://localhost:*", "http://127.0.0.1:*"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
@@ -60,7 +59,7 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/listings/**").permitAll() // public browse, no login required to view deals
+                        .requestMatchers("/api/listings/**").permitAll()
                         .requestMatchers("/api/batches/**").hasAnyRole("STORE_MANAGER", "STORE_STAFF")
                         .requestMatchers("/api/orders/**").hasAnyRole("NGO", "CUSTOMER", "STORE_MANAGER", "STORE_STAFF")
                         .anyRequest().authenticated()

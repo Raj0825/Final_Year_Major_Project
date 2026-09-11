@@ -29,7 +29,7 @@ public class User {
     // only set when role == STORE_MANAGER or STORE_STAFF
     private String storeId;
 
-    // buyer-side preferences, used for notification targeting
+
     private GeoJsonPoint location;
     private Double notificationRadiusKm;
     private List<String> preferredCategories;

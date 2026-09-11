@@ -37,7 +37,7 @@ public class Listing {
     private String storeName;
 
     @GeoSpatialIndexed(type = GeoSpatialIndexType.GEO_2DSPHERE)
-    private GeoJsonPoint storeLocation; // [longitude, latitude]
+    private GeoJsonPoint storeLocation;
 
     private String productName;
     private String category;
@@ -51,7 +51,7 @@ public class Listing {
     private String unit;
 
     private Batch.BatchState tier;
-    private boolean urgent; // true once in TIER_3, drives push notification + feed sort priority
+    private boolean urgent;
 
     private Instant listedAt;
     private Instant updatedAt;

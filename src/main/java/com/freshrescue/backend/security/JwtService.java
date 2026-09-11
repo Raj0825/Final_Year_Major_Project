@@ -61,7 +61,7 @@ public class JwtService {
         return parseClaims(token).get("role", String.class);
     }
 
-    /** Null for buyer roles (NGO/CUSTOMER); set for STORE_MANAGER/STORE_STAFF. */
+
     public String extractStoreId(String token) {
         return parseClaims(token).get("storeId", String.class);
     }
