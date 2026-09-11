@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, createContext, useContext } from "react";
 import {
   AlertTriangle, ArrowRight, BarChart3, BadgeCheck, Bell, Boxes, Building2,
   CalendarClock, Check, CheckCircle2, ChevronDown, ClipboardCheck,
-  Clock3, FileScan, Handshake, Leaf, LogOut, MapPin, Menu, PackageCheck,
+  Clock3, Edit3, Flag, FileScan, Handshake, Heart, Leaf, LogOut, MapPin, Menu, PackageCheck,
   Plus, Search, Send, Settings, ShieldCheck, SlidersHorizontal,
   Truck, UploadCloud, Users, X, ScanLine, Sparkles, RefreshCw, ShoppingBag,
-  QrCode, History
+  QrCode, History, ShoppingCart, Store, Minus, Moon, Sun
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Link, Route, Switch, useLocation } from "wouter";
@@ -23,134 +23,213 @@ type AppWorkspaceRole = "supermarket" | "ngo";
 type ToastKind = "success" | "warning" | "error";
 type ToastState = { message: string; kind: ToastKind } | null;
 
-// Store Staff Navigation
+// Dark Mode Theme Context
+const ThemeContext = createContext<{ theme: "light" | "dark"; toggleTheme: () => void }>({
+  theme: "light",
+  toggleTheme: () => {},
+});
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    return (localStorage.getItem("ss_theme") as "light" | "dark") || "light";
+  });
+
+  useEffect(() => {
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+    localStorage.setItem("ss_theme", theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => (prev === "dark" ? "light" : "dark"));
+  };
+
+  return (
+    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+export function useTheme() {
+  return useContext(ThemeContext);
+}
+
+function ThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
+  return (
+    <button
+      onClick={toggleTheme}
+      title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+      className="p-2 rounded-xl border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#E2E8E5] hover:bg-[#F8F6F1] dark:hover:bg-[#26312E] transition-all shadow-sm flex items-center justify-center cursor-pointer"
+      aria-label="Toggle dark mode"
+    >
+      {theme === "dark" ? (
+        <Sun className="h-4 w-4 text-[#F59E0B]" />
+      ) : (
+        <Moon className="h-4 w-4 text-[#554F4A]" />
+      )}
+    </button>
+  );
+}
+
+// Store Staff Navigation matching reference screenshot
 const supermarketNav = [
   { href: "/supermarket/overview", label: "Overview", icon: BarChart3 },
   { href: "/supermarket/inventory", label: "Inventory", icon: Boxes },
   { href: "/supermarket/detection", label: "Freshness check", icon: ScanLine },
-  { href: "/supermarket/surplus", label: "Flagged surplus", icon: AlertTriangle },
-  { href: "/supermarket/verification", label: "Counter Verification", icon: BadgeCheck },
-  { href: "/supermarket/impact", label: "Impact & ESG", icon: Leaf },
+  { href: "/supermarket/inventory?view=expiry", label: "Expiry date", icon: CalendarClock },
+  { href: "/supermarket/surplus", label: "Available food", icon: PackageCheck },
+  { href: "/supermarket/verification?view=requests", label: "Food requests", icon: Users },
+  { href: "/supermarket/verification?view=pickups", label: "Pickups", icon: Truck },
+  { href: "/supermarket/verification", label: "Verify pickup", icon: BadgeCheck },
+  { href: "/supermarket/impact", label: "Impact", icon: Leaf },
 ];
 
-// Simplified Customer & NGO Navigation: Browse Food, Active QR Passes, Order History
+// Customer & NGO Navigation (Removed Verify pickup as requested)
 const ngoNav = [
-  { href: "/ngo/available-food", label: "Browse Food", icon: Boxes },
-  { href: "/ngo/active", label: "Active QR Passes", icon: QrCode },
-  { href: "/ngo/history", label: "Order History", icon: History },
+  { href: "/ngo/overview", label: "Overview", icon: BarChart3 },
+  { href: "/ngo/available-food", label: "Food available nearby", icon: Boxes },
+  { href: "/ngo/history", label: "My orders", icon: ClipboardCheck },
+  { href: "/ngo/active", label: "My pickups", icon: Truck },
+  { href: "/ngo/impact", label: "Impact", icon: Leaf },
 ];
 
 function Logo({ dark = false }: { dark?: boolean }) {
-  return (
-    <div className={`flex items-center gap-2.5 ${dark ? "text-white" : "text-[hsl(var(--primary))]"}`}>
-      <div className={`grid h-9 w-9 place-items-center rounded-xl ${dark ? "bg-[hsl(var(--accent))]" : "bg-[hsl(var(--primary))]"}`}>
-        <Leaf className="h-5 w-5 text-white" strokeWidth={2.5} />
+  if (dark) {
+    return (
+      <div className="flex items-center gap-2.5">
+        <div className="grid h-8 w-8 place-items-center rounded-lg bg-[#FF6548] text-white font-bold text-base shadow-sm">
+          S
+        </div>
+        <span className="text-lg font-bold tracking-tight text-white">
+          Smart<span className="text-[#FF6548]">Surplus</span>
+        </span>
       </div>
-      <span className="text-lg font-bold tracking-tight">Smart <span className="ss-serif font-normal italic">Surplus</span></span>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2.5">
+      <div className="grid h-8 w-8 place-items-center rounded-lg bg-[#343D3B] text-white font-bold text-base shadow-sm">
+        S
+      </div>
+      <span className="text-lg font-bold tracking-tight text-[#2D2320] dark:text-[#F0F4F2]">
+        Smart<span className="text-[#FF6548]">Surplus</span>
+      </span>
     </div>
   );
 }
 
-function StatusChip({ label }: { label: string }) {
-  const tone = label.toLowerCase();
-  const cls = tone.includes("urgent") || tone.includes("tier_3") || tone.includes("critical") ? "bg-red-50 text-[#C62828]" :
-    tone.includes("near") || tone.includes("pending") || tone.includes("tier_2") || tone.includes("reserved") ? "bg-orange-50 text-[#E65100]" :
-    tone.includes("safe") || tone.includes("verified") || tone.includes("fresh") || tone.includes("fulfilled") ? "bg-green-50 text-[#2E7D32]" :
-    tone.includes("tier_1") ? "bg-amber-50 text-[#C2671A]" :
-    "bg-stone-100 text-[hsl(var(--muted-foreground))]";
-  return <span className={`ss-chip ${cls}`}>{label}</span>;
+function StatusBadge({ label }: { label: string }) {
+  const norm = (label || "").toLowerCase();
+  if (norm.includes("expir") || norm.includes("tier_3") || norm.includes("tier_2") || norm.includes("urgent")) {
+    return <span className="ss-chip badge-expiring">Expiring soon</span>;
+  }
+  if (norm.includes("avail") || norm.includes("fresh") || norm.includes("tier_1")) {
+    return <span className="ss-chip badge-available">Available</span>;
+  }
+  if (norm.includes("reserv")) {
+    return <span className="ss-chip badge-reserved">Reserved</span>;
+  }
+  if (norm.includes("confirm")) {
+    return <span className="ss-chip badge-confirmed">Confirmed</span>;
+  }
+  if (norm.includes("await") || norm.includes("pending")) {
+    return <span className="ss-chip badge-awaiting">Awaiting pickup</span>;
+  }
+  return <span className="ss-chip badge-available">{label}</span>;
 }
 
 function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
   if (!toast) return null;
   return (
-    <div className="fixed bottom-5 right-5 z-50 flex max-w-sm items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-white px-4 py-3 shadow-xl ss-reveal" role="status">
-      {toast.kind === "success" ? <CheckCircle2 className="h-5 w-5 text-[#2E7D32]" /> : <AlertTriangle className="h-5 w-5 text-[#E65100]" />}
-      <span className="text-sm font-semibold text-[hsl(var(--foreground))]">{toast.message}</span>
-      <button onClick={onClose} aria-label="Close notification"><X className="h-4 w-4 text-[hsl(var(--muted-foreground))]" /></button>
+    <div className="fixed bottom-5 right-5 z-50 flex max-w-sm items-center gap-3 rounded-xl border border-[#EAE6DF] bg-white px-4 py-3 shadow-xl ss-reveal" role="status">
+      {toast.kind === "success" ? <CheckCircle2 className="h-5 w-5 text-[#00897B]" /> : <AlertTriangle className="h-5 w-5 text-[#FF6548]" />}
+      <span className="text-sm font-semibold text-[#2D2320]">{toast.message}</span>
+      <button onClick={onClose} aria-label="Close notification"><X className="h-4 w-4 text-[#8A847E]" /></button>
     </div>
   );
 }
 
 // -------------------------------------------------------------
-// LANDING PAGE
+// LANDING PAGE (Clean General Network)
 // -------------------------------------------------------------
 function Landing() {
+  const [, setLocation] = useLocation();
+
   return (
-    <div className="ss-shell min-h-[100dvh] ss-noise">
-      <header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5 lg:px-10">
+    <div className="ss-shell min-h-[100dvh] ss-noise flex flex-col justify-between">
+      {/* Top Header */}
+      <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6 lg:px-10">
         <Logo />
         <div className="flex items-center gap-3">
-          <Link href="/login" className="ss-btn-soft inline-flex items-center gap-2 px-4 py-2 text-sm">Sign In / Demo <ArrowRight className="h-4 w-4" /></Link>
+          <span className="text-sm font-medium text-[#7D7670] dark:text-[#A6B2AF]">Surplus Food Network</span>
+          <ThemeToggle />
         </div>
       </header>
-      <main>
-        <section className="mx-auto grid max-w-7xl items-center gap-12 px-5 pb-20 pt-12 lg:grid-cols-[1.05fr_.95fr] lg:px-10 lg:pb-28 lg:pt-20">
-          <div className="ss-reveal">
-            <p className="ss-kicker mb-5">A better last mile for good food</p>
-            <h1 className="max-w-3xl text-5xl font-bold leading-[.98] tracking-[-.055em] text-[hsl(var(--primary))] sm:text-7xl">Good food should reach <span className="ss-serif font-normal italic">people,</span> not bins.</h1>
-            <p className="mt-7 max-w-xl text-lg leading-8 text-[hsl(var(--muted-foreground))]">
-              Smart Surplus helps Indian supermarkets move safe, near-expiry produce to customers and NGOs at up to 60% discount with instant QR code pickup passes.
-            </p>
-            <div className="mt-9 flex flex-wrap gap-3">
-              <Link href="/login" className="ss-btn-primary inline-flex items-center gap-2 px-5 py-3">Open Workspace <ArrowRight className="h-4 w-4" /></Link>
-              <a href="#how-it-works" className="ss-btn-soft inline-flex items-center gap-2 px-5 py-3">See how it works</a>
-            </div>
-            <div className="mt-12 flex items-center gap-7 border-t border-[hsl(var(--border))] pt-5 text-sm text-[hsl(var(--muted-foreground))]">
-              <span><strong className="block text-xl text-[hsl(var(--primary))]">1,284</strong> meals redirected</span>
-              <span><strong className="block text-xl text-[hsl(var(--primary))]">38</strong> partner NGOs</span>
-              <span><strong className="block text-xl text-[hsl(var(--primary))]">4.6T</strong> food saved</span>
-            </div>
+
+      {/* Main Hero */}
+      <main className="mx-auto w-full max-w-4xl px-6 py-12 lg:px-10">
+        <div className="ss-reveal">
+          <div className="inline-flex items-center px-3 py-1 rounded-full bg-[#E0F7F2] text-[#00897B] text-xs font-semibold tracking-wide mb-6">
+            Built for zero-waste food teams
           </div>
-          <div className="relative ss-reveal [animation-delay:100ms]">
-            <div className="ss-grid-paper absolute -inset-5 rounded-[28px] opacity-60" />
-            <div className="relative overflow-hidden rounded-[24px] bg-[hsl(var(--primary))] p-6 text-white shadow-2xl sm:p-8">
-              <div className="flex items-start justify-between">
-                <div><p className="text-sm text-white/65">Live Produce Scan</p><p className="mt-1 text-2xl font-bold">Keras CNN Intelligence</p></div>
-                <div className="rounded-full bg-white/10 p-2"><Clock3 className="h-5 w-5 text-[#F7A28B]" /></div>
-              </div>
-              <div className="mt-8 space-y-3">
-                <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[.07] p-4">
-                  <div><p className="font-semibold">Orange Lot #2401</p><p className="mt-1 text-xs text-white/60">CNN Freshness: 95% • 7 Days Left</p></div>
-                  <span className="ss-chip bg-green-500/20 text-emerald-300">Fresh (0%)</span>
+
+          <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight text-[#2E221F] leading-[1.08]">
+            Move good food. <br />
+            <span className="text-[#FF6548]">Right on time.</span>
+          </h1>
+
+          <p className="mt-6 max-w-xl text-base md:text-lg text-[#6C655F] leading-relaxed">
+            Smart Surplus connects supermarkets with nearby organizations and customers so usable food moves before it expires.
+          </p>
+
+          <p className="mt-14 text-sm font-medium text-[#7D7670]">
+            How will you use Smart Surplus?
+          </p>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <Link
+              href="/login?role=supermarket"
+              className="group flex items-center justify-between rounded-2xl border border-[#EAE6DF] bg-white p-5 shadow-sm transition-all hover:border-[#D0C9BE] hover:shadow-md cursor-pointer"
+            >
+              <div className="flex items-center gap-4">
+                <div className="grid h-12 w-12 place-items-center rounded-xl bg-[#E8F8F4] text-[#00897B] shrink-0">
+                  <Building2 className="h-6 w-6" />
                 </div>
-                <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[.07] p-4">
-                  <div><p className="font-semibold">Banana Lot #0941</p><p className="mt-1 text-xs text-white/60">CNN Freshness: 45% • 2 Days Left</p></div>
-                  <span className="ss-chip bg-amber-500/20 text-amber-300">Tier 2 (-40%)</span>
-                </div>
-                <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[.07] p-4">
-                  <div><p className="font-semibold">Apple Lot #1048</p><p className="mt-1 text-xs text-white/60">CNN Freshness: 25% • 1 Day Left</p></div>
-                  <span className="ss-chip bg-red-500/20 text-red-300">Tier 3 (-60% Urgent 🔥)</span>
+                <div>
+                  <h2 className="text-base font-bold text-[#2D2320]">I manage a supermarket</h2>
+                  <p className="mt-0.5 text-xs text-[#7A746E]">Manage inventory, identify surplus food and arrange pickups.</p>
                 </div>
               </div>
-              <div className="mt-7 flex items-center justify-between border-t border-white/10 pt-5 text-sm">
-                <span className="text-white/65">Instant QR Code Handoff</span>
-                <strong>Scan & Collect at Store Counter</strong>
-              </div>
-            </div>
-          </div>
-        </section>
-        <section id="how-it-works" className="border-y border-[hsl(var(--border))] bg-white/55">
-          <div className="mx-auto max-w-7xl px-5 py-20 lg:px-10">
-            <p className="ss-kicker">Simple 3-Step Flow</p>
-            <div className="mt-4 grid gap-10 md:grid-cols-3">
-              {[
-                ["01", "Browse Discounted Produce", "Customers and NGOs view live near-expiry produce discounted up to 60% off at local supermarkets."],
-                ["02", "Reserve & Get QR Code", "Reserve desired items online with a 15-minute guaranteed hold and receive an instant QR Code & Pass ID."],
-                ["03", "Collect at Store Counter", "Walk into the supermarket, show your QR code to the cashier, and the store staff scans it to complete the purchase and deduct inventory."],
-              ].map(([number, title, copy]) => (
-                <div key={number} className="border-t-2 border-[hsl(var(--primary))] pt-4">
-                  <span className="ss-mono text-xs text-[hsl(var(--accent))]">{number}</span>
-                  <h2 className="mt-4 text-2xl font-bold text-[hsl(var(--primary))]">{title}</h2>
-                  <p className="mt-3 leading-7 text-[hsl(var(--muted-foreground))]">{copy}</p>
+              <ArrowRight className="h-5 w-5 text-[#9C958E] transition-transform group-hover:translate-x-1 shrink-0 ml-3" />
+            </Link>
+
+            <Link
+              href="/login?role=ngo"
+              className="group flex items-center justify-between rounded-2xl border border-[#EAE6DF] bg-white p-5 shadow-sm transition-all hover:border-[#D0C9BE] hover:shadow-md cursor-pointer"
+            >
+              <div className="flex items-center gap-4">
+                <div className="grid h-12 w-12 place-items-center rounded-xl bg-[#FDF0EB] text-[#FF6548] shrink-0">
+                  <Handshake className="h-6 w-6" />
                 </div>
-              ))}
-            </div>
+                <div>
+                  <h2 className="text-base font-bold text-[#2D2320]">I need surplus food</h2>
+                  <p className="mt-0.5 text-xs text-[#7A746E]">Find available food nearby as an NGO or individual customer.</p>
+                </div>
+              </div>
+              <ArrowRight className="h-5 w-5 text-[#9C958E] transition-transform group-hover:translate-x-1 shrink-0 ml-3" />
+            </Link>
           </div>
-        </section>
+        </div>
       </main>
-      <footer className="border-t border-[hsl(var(--border))] px-5 py-6 text-center text-xs text-[hsl(var(--muted-foreground))]">
-        FreshRescue & Smart Surplus • Final Year Major Project Platform
+
+      <footer className="mx-auto w-full max-w-6xl px-6 py-6 text-xs text-[#8A847E] flex justify-between items-center">
+        <span>Smart Surplus • FreshRescue</span>
+        <span>Connected Surplus Food Network</span>
       </footer>
     </div>
   );
@@ -161,7 +240,10 @@ function Landing() {
 // -------------------------------------------------------------
 function Login() {
   const [, setLocation] = useLocation();
-  const [role, setRole] = useState<AppWorkspaceRole>("supermarket");
+  const searchParams = new URLSearchParams(window.location.search);
+  const initialRole = (searchParams.get("role") as AppWorkspaceRole) || "supermarket";
+
+  const [role, setRole] = useState<AppWorkspaceRole>(initialRole);
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -179,7 +261,7 @@ function Login() {
         const res = await apiRegister({
           email,
           password,
-          name: name || (role === "supermarket" ? "Store Staff" : "Valued Customer"),
+          name: name || (role === "supermarket" ? "Ananya Kulkarni" : "Priya Deshmukh"),
           role: backendRole,
         });
         localStorage.setItem("fr_token", res.token);
@@ -189,7 +271,7 @@ function Login() {
         localStorage.setItem("fr_token", res.token);
         localStorage.setItem("fr_user", JSON.stringify(res));
       }
-      setLocation(role === "supermarket" ? "/supermarket/overview" : "/ngo/available-food");
+      setLocation(role === "supermarket" ? "/supermarket/overview" : "/ngo/overview");
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || "Authentication failed. Check credentials.");
     } finally {
@@ -202,89 +284,104 @@ function Login() {
     if (demoRole === "supermarket") {
       setEmail("raj@store.com");
       setPassword("password123");
-      setName("Raj (Store Staff)");
+      setName("Ananya Kulkarni");
     } else {
       setEmail("priya@ngo.org");
       setPassword("password123");
-      setName("Priya (Customer)");
+      setName("Priya Deshmukh");
     }
   };
 
   return (
-    <div className="ss-shell ss-grid-paper flex min-h-[100dvh] flex-col">
-      <header className="mx-auto w-full max-w-6xl px-5 py-6">
+    <div className="ss-shell flex min-h-[100dvh] flex-col justify-between">
+      <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
         <Link href="/"><Logo /></Link>
+        <ThemeToggle />
       </header>
-      <main className="mx-auto flex w-full max-w-6xl flex-1 items-center px-5 py-12">
-        <div className="grid w-full gap-12 lg:grid-cols-[.8fr_1.2fr] lg:items-center">
+
+      <main className="mx-auto flex w-full max-w-6xl flex-1 items-center px-6 py-8">
+        <div className="grid w-full gap-12 lg:grid-cols-[.9fr_1.1fr] lg:items-center">
           <div>
-            <p className="ss-kicker">Unified Workspace</p>
-            <h1 className="mt-4 text-5xl font-bold tracking-tight text-[hsl(var(--primary))]">Choose your<br /><span className="ss-serif font-normal italic">point of view.</span></h1>
-            <p className="mt-5 max-w-md leading-7 text-[hsl(var(--muted-foreground))]">
-              Manage stock & scan QR codes at checkout as <strong>Store Staff</strong>, or browse discounted food & get instant QR pickup codes as a <strong>Customer / NGO</strong>.
+            <div className="inline-flex items-center px-3 py-1 rounded-full bg-[#E0F7F2] text-[#00897B] text-xs font-semibold tracking-wide mb-4">
+              Unified Portal
+            </div>
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-[#2E221F] leading-tight">
+              Sign in to <br /><span className="text-[#FF6548]">Smart Surplus</span>
+            </h1>
+            <p className="mt-4 max-w-md text-sm text-[#6C655F] leading-relaxed">
+              Supermarket managers track inventory decay & fulfill pickups. NGOs and local customers browse discounted food and get instant QR pickup passes.
             </p>
-            <div className="mt-8 flex gap-3">
-              <button onClick={() => handleQuickDemo("supermarket")} className="ss-btn-soft px-3 py-2 text-xs">Quick Supermarket Demo</button>
-              <button onClick={() => handleQuickDemo("ngo")} className="ss-btn-soft px-3 py-2 text-xs">Quick Customer / NGO Demo</button>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <button onClick={() => handleQuickDemo("supermarket")} className="ss-btn-soft px-3.5 py-2 text-xs">
+                Quick Supermarket Demo
+              </button>
+              <button onClick={() => handleQuickDemo("ngo")} className="ss-btn-soft px-3.5 py-2 text-xs">
+                Quick Customer / NGO Demo
+              </button>
             </div>
           </div>
-          <div className="ss-card mx-auto w-full max-w-lg p-6 sm:p-8">
+
+          <div className="ss-card mx-auto w-full max-w-md p-6 sm:p-8">
             <div className="mb-6 flex items-center justify-between">
               <div>
-                <p className="font-bold text-[hsl(var(--primary))]">{isRegister ? "Create Account" : "Sign In to Workspace"}</p>
-                <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Select role and enter your details.</p>
+                <p className="font-bold text-[#2D2320]">{isRegister ? "Create Account" : "Sign In"}</p>
+                <p className="mt-0.5 text-xs text-[#7A746E]">Select your workspace role below.</p>
               </div>
-              <button onClick={() => setIsRegister(!isRegister)} className="text-xs font-semibold text-[hsl(var(--accent))] hover:underline">
-                {isRegister ? "Have an account? Sign In" : "Need an account? Sign Up"}
+              <button onClick={() => setIsRegister(!isRegister)} className="text-xs font-semibold text-[#FF6548] hover:underline">
+                {isRegister ? "Have an account? Sign In" : "Need account? Sign Up"}
               </button>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3 mb-5">
               <button
                 type="button"
                 onClick={() => setRole("supermarket")}
-                className={`rounded-xl border-2 p-4 text-left ${role === "supermarket" ? "border-[hsl(var(--accent))] bg-orange-50/50" : "border-[hsl(var(--border))] bg-white"}`}
+                className={`rounded-xl border p-3.5 text-left transition-all ${role === "supermarket" ? "border-[#FF6548] bg-[#FDF2EF]" : "border-[#EAE6DF] bg-white"}`}
               >
-                <Building2 className="h-5 w-5 text-[hsl(var(--primary))]" />
-                <strong className="mt-3 block text-sm">Supermarket Staff</strong>
-                <span className="mt-1 block text-xs text-[hsl(var(--muted-foreground))]">Manage stock, run CNN scans & scan QR codes.</span>
+                <Building2 className={`h-5 w-5 ${role === "supermarket" ? "text-[#FF6548]" : "text-[#7A746E]"}`} />
+                <strong className="mt-2 block text-xs font-bold text-[#2D2320]">Supermarket</strong>
+                <span className="text-[11px] text-[#7A746E]">Manager workspace</span>
               </button>
               <button
                 type="button"
                 onClick={() => setRole("ngo")}
-                className={`rounded-xl border-2 p-4 text-left ${role === "ngo" ? "border-[hsl(var(--accent))] bg-orange-50/50" : "border-[hsl(var(--border))] bg-white"}`}
+                className={`rounded-xl border p-3.5 text-left transition-all ${role === "ngo" ? "border-[#FF6548] bg-[#FDF2EF]" : "border-[#EAE6DF] bg-white"}`}
               >
-                <Users className="h-5 w-5 text-[hsl(var(--primary))]" />
-                <strong className="mt-3 block text-sm">Customer & NGO</strong>
-                <span className="mt-1 block text-xs text-[hsl(var(--muted-foreground))]">Browse discounted food, get QR pass & buy.</span>
+                <Users className={`h-5 w-5 ${role === "ngo" ? "text-[#FF6548]" : "text-[#7A746E]"}`} />
+                <strong className="mt-2 block text-xs font-bold text-[#2D2320]">Customer / NGO</strong>
+                <span className="text-[11px] text-[#7A746E]">Browse & QR passes</span>
               </button>
             </div>
 
-            {error && <div className="mt-4 rounded-lg bg-red-50 p-3 text-xs font-semibold text-red-600">{error}</div>}
+            {error && <div className="mb-4 rounded-lg bg-red-50 p-3 text-xs font-medium text-red-600 border border-red-200">{error}</div>}
 
-            <form onSubmit={handleAuth} className="mt-5 space-y-3">
+            <form onSubmit={handleAuth} className="space-y-3">
               {isRegister && (
                 <div>
-                  <label className="block text-xs font-semibold text-[hsl(var(--foreground))]">Full Name</label>
-                  <input value={name} onChange={e => setName(e.target.value)} required className="ss-input mt-1" placeholder="e.g. Priya Sharma" />
+                  <label className="block text-xs font-semibold text-[#2D2320]">Full Name</label>
+                  <input value={name} onChange={e => setName(e.target.value)} required className="ss-input mt-1 text-sm" placeholder="e.g. Priya Deshmukh" />
                 </div>
               )}
               <div>
-                <label className="block text-xs font-semibold text-[hsl(var(--foreground))]">Email Address</label>
-                <input type="email" value={email} onChange={e => setEmail(e.target.value)} required className="ss-input mt-1" placeholder="name@email.com" />
+                <label className="block text-xs font-semibold text-[#2D2320]">Email Address</label>
+                <input type="email" value={email} onChange={e => setEmail(e.target.value)} required className="ss-input mt-1 text-sm" placeholder="name@email.com" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-[hsl(var(--foreground))]">Password</label>
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} required className="ss-input mt-1" placeholder="••••••••" />
+                <label className="block text-xs font-semibold text-[#2D2320]">Password</label>
+                <input type="password" value={password} onChange={e => setPassword(e.target.value)} required className="ss-input mt-1 text-sm" placeholder="••••••••" />
               </div>
-              <button type="submit" disabled={loading} className="ss-btn-primary mt-4 flex w-full items-center justify-center gap-2 px-4 py-3 text-sm">
+              <button type="submit" disabled={loading} className="ss-btn-coral mt-4 flex w-full items-center justify-center gap-2 px-4 py-3 text-sm">
                 {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                {isRegister ? "Create Account & Enter" : `Enter as ${role === "ngo" ? "Customer / NGO" : "Supermarket Staff"}`}
+                {isRegister ? "Create Account & Enter" : `Enter as ${role === "ngo" ? "Customer / NGO" : "Store Manager"}`}
               </button>
             </form>
           </div>
         </div>
       </main>
+
+      <footer className="mx-auto w-full max-w-6xl px-6 py-4 text-xs text-[#8A847E] text-center">
+        Smart Surplus • Surplus Food Network
+      </footer>
     </div>
   );
 }
@@ -297,8 +394,10 @@ function Sidebar({ role, path, onNavigate }: { role: AppWorkspaceRole; path: str
   const items = role === "supermarket" ? supermarketNav : ngoNav;
   const userRaw = localStorage.getItem("fr_user");
   const user = userRaw ? JSON.parse(userRaw) : null;
-  const displayName = user?.name || (role === "ngo" ? "Priya (Customer)" : "Raj (Store Staff)");
-  const initials = displayName.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase() || "FR";
+  const displayName = user?.name || (role === "ngo" ? "Priya Deshmukh" : "Ananya Kulkarni");
+  const storeCardInitials = role === "supermarket" ? "FM" : "PD";
+  const storeTitle = role === "supermarket" ? "FreshMart Supermarket" : displayName;
+  const storeSubtitle = role === "supermarket" ? "Supermarket manager" : "Individual customer";
 
   const handleLogout = () => {
     localStorage.removeItem("fr_token");
@@ -307,41 +406,74 @@ function Sidebar({ role, path, onNavigate }: { role: AppWorkspaceRole; path: str
   };
 
   return (
-    <aside className="ss-sidebar hidden w-[248px] shrink-0 flex-col lg:flex">
-      <div className="px-5 pb-6 pt-7"><Logo dark /></div>
-      <div className="px-5 pb-5">
-        <div className="rounded-xl border border-white/10 bg-white/[.07] p-3">
-          <p className="ss-mono text-[10px] uppercase tracking-wider text-white/50">Signed in as</p>
-          <div className="mt-2 flex items-center gap-2">
-            <div className="grid h-8 w-8 place-items-center rounded-full bg-[#F7A28B] text-xs font-bold text-[hsl(var(--primary))]">{initials}</div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold">{displayName}</p>
-              <p className="truncate text-xs text-white/55">{role === "ngo" ? "Customer / NGO" : "Store Staff"}</p>
-            </div>
+    <aside className="ss-sidebar hidden w-[240px] shrink-0 flex-col lg:flex border-r border-[#3E4947]">
+      {/* Top Logo */}
+      <div className="px-5 pb-5 pt-6">
+        <Logo dark />
+      </div>
+
+      {/* Profile Card (FM FreshMart... / PD Priya Deshmukh) */}
+      <div className="px-4 pb-4">
+        <div className="rounded-xl bg-[#28312F] border border-white/5 p-3 flex items-center gap-3">
+          <div className="grid h-8 w-8 place-items-center rounded-lg bg-[#FF6548] text-xs font-bold text-white shrink-0">
+            {storeCardInitials}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-bold text-white">{storeTitle}</p>
+            <p className="truncate text-[11px] text-[#8E9B97]">{storeSubtitle}</p>
           </div>
         </div>
       </div>
-      <nav className="flex-1 px-3" aria-label={`${role} navigation`}>
-        <p className="ss-mono mb-2 px-3 text-[10px] uppercase tracking-widest text-white/40">Workspace</p>
+
+      {/* Navigation Links */}
+      <nav className="flex-1 px-3 space-y-1" aria-label={`${role} navigation`}>
         {items.map(item => {
           const Icon = item.icon;
-          const active = path === item.href;
+          const active = path === item.href || (item.href.includes("?") && path === item.href.split("?")[0]);
           return (
-            <Link key={item.href} href={item.href} onClick={onNavigate} className={`ss-link mb-1 flex items-center gap-3 rounded-r-lg px-3 py-2.5 text-sm font-medium ${active ? "ss-link-active" : ""}`}>
-              <Icon className="h-[17px] w-[17px]" />
-              {item.label}
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={onNavigate}
+              className={`flex items-center gap-3 px-3.5 py-2.5 text-sm font-medium transition-all ${active ? "ss-sidebar-link-active" : "ss-sidebar-link"}`}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="truncate">{item.label}</span>
             </Link>
           );
         })}
-        <p className="ss-mono mb-2 mt-7 px-3 text-[10px] uppercase tracking-widest text-white/40">Account</p>
-        <Link href={`/${role}/notifications`} onClick={onNavigate} className={`ss-link mb-1 flex items-center gap-3 rounded-r-lg px-3 py-2.5 text-sm font-medium ${path.endsWith("notifications") ? "ss-link-active" : ""}`}>
-          <Bell className="h-[17px] w-[17px]" />
-          Notifications
-        </Link>
       </nav>
-      <div className="border-t border-white/10 p-4">
-        <button onClick={handleLogout} className="flex w-full items-center gap-2 px-2 py-2 text-xs text-white/60 hover:text-white">
-          <LogOut className="h-4 w-4" /> Sign Out
+
+      {/* Bottom Nav Links */}
+      <div className="px-3 pb-5 pt-3 border-t border-[#3E4947] space-y-1">
+        <Link
+          href={`/${role}/notifications`}
+          onClick={onNavigate}
+          className={`flex items-center justify-between px-3.5 py-2 text-sm font-medium ${path.endsWith("notifications") ? "ss-sidebar-link-active" : "ss-sidebar-link"}`}
+        >
+          <div className="flex items-center gap-3">
+            <Bell className="h-4 w-4" />
+            <span>Notifications</span>
+          </div>
+          <span className="grid h-5 w-5 place-items-center rounded-full bg-white text-[11px] font-bold text-[#FF6548]">
+            3
+          </span>
+        </Link>
+
+        <button
+          onClick={() => {}}
+          className="flex w-full items-center gap-3 px-3.5 py-2 text-sm font-medium ss-sidebar-link text-left"
+        >
+          <Settings className="h-4 w-4" />
+          <span>Settings</span>
+        </button>
+
+        <button
+          onClick={handleLogout}
+          className="flex w-full items-center gap-3 px-3.5 py-2 text-sm font-medium ss-sidebar-link text-left hover:text-[#FF6548]"
+        >
+          <LogOut className="h-4 w-4" />
+          <span>Change role</span>
         </button>
       </div>
     </aside>
@@ -353,19 +485,26 @@ function MobileNav({ role, path, onNavigate }: { role: AppWorkspaceRole; path: s
   const items = role === "supermarket" ? supermarketNav : ngoNav;
   return (
     <div className="lg:hidden">
-      <div className="flex items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--sidebar))] px-4 py-3">
+      <div className="flex items-center justify-between border-b border-[#3E4947] bg-[#343D3B] px-4 py-3">
         <Logo dark />
-        <button className="rounded-lg p-2 text-white" onClick={() => setOpen(!open)} aria-label="Open navigation">
-          {open ? <X /> : <Menu />}
+        <button className="rounded-lg p-1.5 text-white" onClick={() => setOpen(!open)} aria-label="Open navigation">
+          {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
       </div>
       {open && (
-        <div className="ss-sidebar absolute left-0 right-0 z-30 border-b border-white/10 p-3 shadow-xl">
+        <div className="bg-[#343D3B] absolute left-0 right-0 z-40 border-b border-[#3E4947] p-3 shadow-xl space-y-1">
           {items.map(item => {
             const Icon = item.icon;
+            const active = path === item.href;
             return (
-              <Link key={item.href} href={item.href} onClick={() => { setOpen(false); onNavigate(); }} className={`flex items-center gap-3 rounded-lg px-3 py-3 text-sm ${path === item.href ? "bg-white/10 text-white" : "text-white/70"}`}>
-                <Icon className="h-4 w-4" />{item.label}
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => { setOpen(false); onNavigate(); }}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${active ? "bg-white text-[#2E3735] font-semibold" : "text-[#A6B2AF]"}`}
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
               </Link>
             );
           })}
@@ -375,66 +514,35 @@ function MobileNav({ role, path, onNavigate }: { role: AppWorkspaceRole; path: s
   );
 }
 
-function Topbar({ role, path, onAction }: { role: AppWorkspaceRole; path: string; onAction: (message: string, kind?: ToastKind) => void }) {
-  const current = (role === "supermarket" ? supermarketNav : ngoNav).find(item => item.href === path);
-  const title = current?.label || (path.endsWith("notifications") ? "Notifications" : "Overview");
+function Topbar({ role, path }: { role: AppWorkspaceRole; path: string }) {
   const userRaw = localStorage.getItem("fr_user");
   const user = userRaw ? JSON.parse(userRaw) : null;
-  const name = user?.name || (role === "ngo" ? "Priya" : "Raj");
+  const name = user?.name || (role === "ngo" ? "Priya Deshmukh" : "Ananya Kulkarni");
+  const initials = name.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase() || (role === "ngo" ? "PD" : "AK");
+  const locationBreadcrumb = role === "supermarket" ? "Central Market Hub" : "City Center Market";
+  const workspaceTitle = role === "supermarket" ? "Manager workspace" : "Recipient workspace";
 
   return (
-    <header className="flex items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] px-5 py-4 lg:px-8">
-      <div>
-        <p className="ss-mono text-[10px] uppercase tracking-widest text-[hsl(var(--muted-foreground))]">
-          {role === "ngo" ? "Customer & NGO Portal" : "Store Staff Operations"}
-        </p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight text-[hsl(var(--primary))]">{title}</h1>
+    <header className="flex items-center justify-between bg-[#FAF7F2] dark:bg-[#1A2220] px-6 py-4 lg:px-8 border-b border-[#EAE6DF]/60 dark:border-[#2D3835]">
+      {/* Breadcrumbs matching Screenshot 1 & 2 */}
+      <div className="flex items-center gap-2 text-xs sm:text-sm">
+        <MapPin className="h-4 w-4 text-[#00897B] dark:text-[#2DD4BF] shrink-0" />
+        <span className="font-semibold text-[#00897B] dark:text-[#2DD4BF]">{locationBreadcrumb}</span>
+        <span className="text-[#88827A] dark:text-[#64748B]">&gt;</span>
+        <span className="text-[#554F4A] dark:text-[#CBD5E1] font-medium">{workspaceTitle}</span>
       </div>
+
+      {/* User profile avatar on right + Theme Toggle */}
       <div className="flex items-center gap-3">
-        <Link href={`/${role}/notifications`} className="relative rounded-lg p-2 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--secondary))]">
-          <Bell className="h-5 w-5" />
-          <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[hsl(var(--accent))]" />
-        </Link>
-        <div className="hidden h-8 w-px bg-[hsl(var(--border))] sm:block" />
-        <div className="hidden items-center gap-2 sm:flex">
-          <div className="grid h-8 w-8 place-items-center rounded-full bg-[#D7E6C7] text-xs font-bold text-[hsl(var(--primary))]">
-            {name[0] || "U"}
+        <ThemeToggle />
+        <div className="flex items-center gap-2.5">
+          <div className="grid h-8 w-8 place-items-center rounded-full bg-[#FCE5DF] dark:bg-[#3D2520] text-xs font-bold text-[#E0533C] dark:text-[#FF8D75]">
+            {initials}
           </div>
-          <span className="text-sm font-semibold">{name}</span>
+          <span className="hidden sm:inline text-sm font-semibold text-[#2D2320] dark:text-[#E2E8E5]">{name}</span>
         </div>
       </div>
     </header>
-  );
-}
-
-function Metric({ label, value, note, icon: Icon, tone = "primary" }: { label: string; value: string; note: string; icon: any; tone?: "primary" | "amber" | "salmon" }) {
-  const color = tone === "amber" ? "bg-orange-50 text-[#C2671A]" : tone === "salmon" ? "bg-[#FFF0EC] text-[#C2671A]" : "bg-[#E9F2E4] text-[hsl(var(--primary))]";
-  return (
-    <div className="ss-card p-4 sm:p-5">
-      <div className="flex items-start justify-between">
-        <p className="text-sm text-[hsl(var(--muted-foreground))]">{label}</p>
-        <div className={`rounded-lg p-2 ${color}`}><Icon className="h-4 w-4" /></div>
-      </div>
-      <p className="mt-4 text-3xl font-bold tracking-tight text-[hsl(var(--primary))]">{value}</p>
-      <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{note}</p>
-    </div>
-  );
-}
-
-function PageIntro({ eyebrow, title, copy, action, actionLabel, icon: Icon = Plus }: { eyebrow?: string; title: string; copy?: string; action?: () => void; actionLabel?: string; icon?: any }) {
-  return (
-    <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <p className="ss-kicker">{eyebrow || "Operations"}</p>
-        <h2 className="mt-2 text-3xl font-bold tracking-tight text-[hsl(var(--primary))]">{title}</h2>
-        {copy && <p className="mt-2 max-w-2xl text-sm leading-6 text-[hsl(var(--muted-foreground))]">{copy}</p>}
-      </div>
-      {action && actionLabel && (
-        <button onClick={action} className="ss-btn-amber inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2.5 text-sm">
-          <Icon className="h-4 w-4" />{actionLabel}
-        </button>
-      )}
-    </div>
   );
 }
 
@@ -459,78 +567,199 @@ function DashboardHome({ onAction }: { onAction: (message: string) => void }) {
   const urgentBatches = batches.filter(b => b.state === "TIER_3" || b.state === "TIER_2");
 
   return (
-    <div className="ss-reveal">
-      <PageIntro
-        eyebrow="Supermarket Operations"
-        title="Store Operations at a Glance"
-        copy={`${urgentBatches.length} produce lots currently flagged for discount or nearing expiry.`}
-        action={() => setLocation("/supermarket/detection")}
-        actionLabel="Run CNN Freshness Scan"
-        icon={ScanLine}
-      />
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Active store batches" value={`${batches.length}`} note="Currently stocked in MongoDB" icon={Boxes} />
-        <Metric label="Expiring soon" value={`${urgentBatches.length} lots`} note="Requires discount or donation" icon={AlertTriangle} tone="salmon" />
-        <Metric label="Waiting customer pickups" value={`${pendingOrders.length}`} note="Pending QR counter verification" icon={CalendarClock} tone="amber" />
-        <Metric label="Diverted produce" value="4.6 T" note="Saved from landfill this month" icon={Leaf} />
+    <div className="ss-reveal max-w-6xl mx-auto space-y-6">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-[#00897B]">THURSDAY, 19 JUNE 2026</p>
+          <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] mt-1">Items needing attention</h1>
+          <p className="text-sm text-[#78726B] mt-1">A clear view of food that needs a decision before the next pickup window.</p>
+        </div>
+        <button
+          onClick={() => setLocation("/supermarket/surplus")}
+          className="ss-btn-coral px-4 py-2.5 text-sm flex items-center justify-center gap-1.5 shrink-0 self-start sm:self-center shadow-sm"
+        >
+          <Plus className="h-4 w-4" /> List surplus
+        </button>
       </div>
 
-      <div className="mt-7 grid gap-5 xl:grid-cols-[1.35fr_.65fr]">
-        <section className="ss-card overflow-hidden">
-          <div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-5 py-4">
+      {/* 4 Metric Cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="ss-card p-5">
+          <div className="flex items-start justify-between">
             <div>
-              <h3 className="font-bold text-[hsl(var(--primary))]">Produce Expiry Watchlist</h3>
-              <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Live batches monitored by CNN and discount engine</p>
+              <p className="text-xs font-medium text-[#7D7670]">Items needing attention</p>
+              <p className="mt-3 text-3xl font-extrabold text-[#2E221F]">{urgentBatches.length || 12}</p>
+              <p className="mt-2 text-xs text-[#8A847E]">4 expiring today</p>
             </div>
-            <Link href="/supermarket/inventory" className="text-xs font-bold text-[hsl(var(--accent))]">
-              See all <ArrowRight className="ml-1 inline h-3.5 w-3.5" />
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#FEECE8] text-[#E0533C] shrink-0">
+              <AlertTriangle className="h-4 w-4" />
+            </div>
+          </div>
+        </div>
+
+        <div className="ss-card p-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-medium text-[#7D7670]">Food awaiting pickup</p>
+              <p className="mt-3 text-3xl font-extrabold text-[#2E221F]">86 kg</p>
+              <p className="mt-2 text-xs text-[#8A847E]">Across 5 reservations</p>
+            </div>
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#E6F8F3] text-[#00897B] shrink-0">
+              <Boxes className="h-4 w-4" />
+            </div>
+          </div>
+        </div>
+
+        <div className="ss-card p-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-medium text-[#7D7670]">Today's pickups</p>
+              <p className="mt-3 text-3xl font-extrabold text-[#2E221F]">{pendingOrders.length || 4}</p>
+              <p className="mt-2 text-xs text-[#8A847E]">Next one at 11:30 AM</p>
+            </div>
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#F0F2F1] text-[#55605D] shrink-0">
+              <Truck className="h-4 w-4" />
+            </div>
+          </div>
+        </div>
+
+        <div className="ss-card p-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-medium text-[#7D7670]">New matches</p>
+              <p className="mt-3 text-3xl font-extrabold text-[#2E221F]">7</p>
+              <p className="mt-2 text-xs text-[#8A847E]">3 NGOs • 4 customers</p>
+            </div>
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#FEECE8] text-[#E0533C] shrink-0">
+              <Users className="h-4 w-4" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2 Middle Cards: Expiring food & Pickup status */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="ss-card p-6">
+          <div className="flex items-center justify-between pb-4 border-b border-[#EAE6DF]/60">
+            <h2 className="text-base font-bold text-[#2E221F]">Expiring food</h2>
+            <Link href="/supermarket/inventory" className="text-xs font-semibold text-[#00897B] hover:underline flex items-center gap-1">
+              View inventory <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>
-          <div className="ss-table-wrap">
-            <table className="ss-table w-full text-sm">
-              <thead>
-                <tr><th>Product</th><th>Quantity</th><th>State</th><th>Discount</th></tr>
-              </thead>
-              <tbody>
-                {batches.slice(0, 5).map(b => (
-                  <tr key={b.id} className="hover:bg-[hsl(var(--secondary)/.45)]">
-                    <td><p className="font-semibold">{b.productName}</p><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{b.category}</p></td>
-                    <td>{b.quantity} {b.unit}</td>
-                    <td><StatusChip label={b.state} /></td>
-                    <td>{b.currentDiscountPercent ? `-${b.currentDiscountPercent}%` : "0%"}</td>
-                  </tr>
-                ))}
-                {batches.length === 0 && (
-                  <tr><td colSpan={4} className="py-8 text-center text-xs text-[hsl(var(--muted-foreground))]">No batches found.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
 
-        <section className="ss-card p-5">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-[hsl(var(--primary))]">Waiting Customer Handoffs</h3>
-            <ClipboardCheck className="h-5 w-5 text-[hsl(var(--accent))]" />
-          </div>
-          <div className="mt-6 space-y-4">
-            {pendingOrders.slice(0, 3).map((order, i) => (
-              <div key={order.id} className="relative flex gap-3">
-                <div className={`relative mt-1 h-4 w-4 shrink-0 rounded-full border-4 ${i === 0 ? "border-[#F7A28B] bg-[hsl(var(--primary))]" : "border-[#D7E6C7] bg-white"}`} />
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center justify-between p-3.5 rounded-xl border border-[#EAE6DF] bg-white">
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#F5F5F3] text-[#7A746E]">
+                  <Boxes className="h-5 w-5" />
+                </div>
                 <div>
-                  <p className="ss-mono text-xs text-[hsl(var(--accent))]">Pass ID: {order.qrCode || order.id.slice(-6).toUpperCase()}</p>
-                  <p className="mt-1 text-sm font-bold">{order.productName || "Fresh Produce Lot"}</p>
-                  <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Qty: {order.quantity} • Status: {order.status}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm text-[#2E221F]">Amul Taaza Milk</span>
+                    <span className="ss-chip badge-expiring">Expiring soon</span>
+                  </div>
+                  <p className="text-xs text-[#7A746E] mt-0.5">26 packets available • Expiry date: Today, 8:00 PM</p>
                 </div>
               </div>
-            ))}
-            {pendingOrders.length === 0 && (
-              <p className="py-4 text-center text-xs text-[hsl(var(--muted-foreground))]">No customers waiting right now.</p>
-            )}
+              <button onClick={() => setLocation("/supermarket/inventory")} className="text-xs font-semibold text-[#FF6548] hover:underline">
+                Manage
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between p-3.5 rounded-xl border border-[#EAE6DF] bg-white">
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#F5F5F3] text-[#7A746E]">
+                  <Boxes className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm text-[#2E221F]">Bhindi</span>
+                    <span className="ss-chip badge-expiring">Expiring soon</span>
+                  </div>
+                  <p className="text-xs text-[#7A746E] mt-0.5">13 kg available • Expiry date: Today, 9:00 PM</p>
+                </div>
+              </div>
+              <button onClick={() => setLocation("/supermarket/inventory")} className="text-xs font-semibold text-[#FF6548] hover:underline">
+                Manage
+              </button>
+            </div>
           </div>
-          <Link href="/supermarket/verification" className="ss-btn-soft mt-7 block w-full text-center px-3 py-2 text-xs">Go to Counter QR Scanner</Link>
-        </section>
+        </div>
+
+        <div className="ss-card p-6">
+          <div className="flex items-center justify-between pb-4 border-b border-[#EAE6DF]/60">
+            <h2 className="text-base font-bold text-[#2E221F]">Pickup status</h2>
+            <Link href="/supermarket/verification" className="text-xs font-semibold text-[#00897B] hover:underline">
+              See all
+            </Link>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center justify-between p-3.5 rounded-xl border border-[#EAE6DF] bg-white">
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#F5F5F3] text-[#7A746E]">
+                  <Truck className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-[#2E221F]">Annapurna Seva Foundation</p>
+                  <p className="text-xs text-[#7A746E] mt-0.5">Today, 11:30 AM</p>
+                </div>
+              </div>
+              <span className="ss-chip badge-confirmed">Confirmed</span>
+            </div>
+
+            <div className="flex items-center justify-between p-3.5 rounded-xl border border-[#EAE6DF] bg-white">
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#F5F5F3] text-[#7A746E]">
+                  <Truck className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-[#2E221F]">Central Community Kitchen</p>
+                  <p className="text-xs text-[#7A746E] mt-0.5">Today, 2:00 PM</p>
+                </div>
+              </div>
+              <span className="ss-chip badge-awaiting">Awaiting pickup</span>
+            </div>
+
+            <div className="flex items-center justify-between p-3.5 rounded-xl border border-[#EAE6DF] bg-white">
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#F5F5F3] text-[#7A746E]">
+                  <Truck className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-[#2E221F]">Priya Deshmukh</p>
+                  <p className="text-xs text-[#7A746E] mt-0.5">Today, 5:30 PM</p>
+                </div>
+              </div>
+              <span className="ss-chip badge-reserved">Reserved</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Section: Recent activity */}
+      <div className="ss-card p-6">
+        <h2 className="text-base font-bold text-[#2E221F] mb-4">Recent activity</h2>
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="border-l-2 border-[#FF6548] pl-3">
+            <p className="font-bold text-sm text-[#2E221F]">8 milk packets reserved</p>
+            <p className="text-xs text-[#7A746E] mt-0.5">Annapurna Seva Foundation</p>
+            <p className="text-[11px] text-[#A6A099] mt-1">12 min ago</p>
+          </div>
+
+          <div className="border-l-2 border-[#FF6548] pl-3">
+            <p className="font-bold text-sm text-[#2E221F]">Pickup confirmed</p>
+            <p className="text-xs text-[#7A746E] mt-0.5">Central Community Kitchen</p>
+            <p className="text-[11px] text-[#A6A099] mt-1">48 min ago</p>
+          </div>
+
+          <div className="border-l-2 border-[#FF6548] pl-3">
+            <p className="font-bold text-sm text-[#2E221F]">Expiry date checked</p>
+            <p className="text-xs text-[#7A746E] mt-0.5">Amul Taaza Milk • 34 packets</p>
+            <p className="text-[11px] text-[#A6A099] mt-1">1 hr ago</p>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -542,14 +771,14 @@ function DashboardHome({ onAction }: { onAction: (message: string) => void }) {
 function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
   const [, setLocation] = useLocation();
   const [batches, setBatches] = useState<Batch[]>([]);
-  const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [newProduct, setNewProduct] = useState("");
-  const [newCategory, setNewCategory] = useState("Fruit");
-  const [newQty, setNewQty] = useState(50);
+  const [newCategory, setNewCategory] = useState("Vegetables");
+  const [newQty, setNewQty] = useState(30);
   const [newUnit, setNewUnit] = useState("kg");
-  const [newPrice, setNewPrice] = useState(60);
+  const [newPrice, setNewPrice] = useState(50);
   const [loading, setLoading] = useState(false);
 
   const fetchBatches = async () => {
@@ -580,141 +809,194 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
       setNewProduct("");
       fetchBatches();
     } catch (err: any) {
-      onAction(err?.message || "Failed to add batch.", "error");
+      onAction(err?.message || "Failed to add batch.");
     } finally {
       setLoading(false);
     }
   };
 
-  const filtered = batches.filter(b => {
-    const matchSearch = b.productName.toLowerCase().includes(search.toLowerCase()) || b.category.toLowerCase().includes(search.toLowerCase());
-    if (filter === "all") return matchSearch;
-    if (filter === "urgent") return matchSearch && (b.state === "TIER_3" || b.state === "TIER_2");
-    if (filter === "fresh") return matchSearch && b.state === "FRESH";
-    return matchSearch;
+  const seedItems = [
+    { id: "s1", name: "Amul Taaza Milk", sku: "FM - 240 • Dairy", available: "26 packets", status: "Expiring soon", expiry: "Today, 8:00 PM", pickup: "Today, 6:00 PM", flagged: true },
+    { id: "s2", name: "Fresh Paneer", sku: "FM - 241 • Dairy", available: "14 packs", status: "Available", expiry: "Tomorrow, 10:00 AM", pickup: "Today, 9:00 PM", flagged: false },
+    { id: "s3", name: "Amul Masti Curd", sku: "FM - 242 • Dairy", available: "20 cups", status: "Reserved", expiry: "Tomorrow, 8:00 AM", pickup: "Today, 7:00 PM", flagged: false },
+    { id: "s4", name: "Tomato", sku: "FM - 243 • Vegetables", available: "30 kg", status: "Available", expiry: "Tomorrow, 6:00 PM", pickup: "Tomorrow, 2:00 PM", flagged: false },
+    { id: "s5", name: "Potato", sku: "FM - 244 • Vegetables", available: "47 kg", status: "Available", expiry: "In 2 days", pickup: "Tomorrow, 5:00 PM", flagged: false },
+    { id: "s6", name: "Bhindi", sku: "FM - 245 • Vegetables", available: "13 kg", status: "Expiring soon", expiry: "Today, 9:00 PM", pickup: "Today, 7:00 PM", flagged: true },
+  ];
+
+  const liveItems = batches.map(b => ({
+    id: b.id,
+    name: b.productName,
+    sku: `FM - ${b.id.slice(-3)} • ${b.category}`,
+    available: `${b.quantity} ${b.unit}`,
+    status: (b.state === "TIER_3" || b.state === "TIER_2") ? "Expiring soon" : b.state === "FRESH" ? "Available" : "Reserved",
+    expiry: "Tomorrow, 8:00 PM",
+    pickup: "Today, 9:00 PM",
+    flagged: b.state === "TIER_3" || b.state === "TIER_2",
+  }));
+
+  const allInventory = [...seedItems, ...liveItems];
+
+  const filtered = allInventory.filter(item => {
+    const match = item.name.toLowerCase().includes(search.toLowerCase()) || item.sku.toLowerCase().includes(search.toLowerCase());
+    if (flaggedOnly) return match && item.flagged;
+    return match;
   });
 
   return (
-    <div className="ss-reveal">
-      <PageIntro
-        eyebrow="Stock management"
-        title="Supermarket Inventory"
-        copy="All produce currently in stock, with shelf tiers maintained automatically by the CNN freshness model and discount engine."
-        action={() => setModalOpen(true)}
-        actionLabel="Add New Produce Lot"
-        icon={Plus}
-      />
+    <div className="ss-reveal max-w-6xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-[#00897B]">FRESHMART SUPERMARKET</p>
+          <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] mt-1">Inventory</h1>
+          <p className="text-sm text-[#78726B] mt-1">Search stock, flag items for attention, and keep expiry information current.</p>
+        </div>
+        <button
+          onClick={() => setModalOpen(true)}
+          className="ss-btn-coral px-4 py-2.5 text-sm flex items-center justify-center gap-1.5 shrink-0 self-start sm:self-center shadow-sm"
+        >
+          <Plus className="h-4 w-4" /> Add inventory
+        </button>
+      </div>
 
+      {/* Search and Filters Bar */}
       <div className="ss-card p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-[hsl(var(--muted-foreground))]" />
-            <input value={search} onChange={e => setSearch(e.target.value)} className="ss-input pl-9" placeholder="Search produce..." />
+        <div className="flex flex-col sm:flex-row items-center gap-3">
+          <div className="relative flex-1 w-full">
+            <Search className="absolute left-3.5 top-3.5 h-4 w-4 text-[#8A847E] pointer-events-none" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search inventory by product or SKU"
+              className="ss-input text-sm"
+              style={{ paddingLeft: "2.6rem" }}
+            />
           </div>
-          <div className="flex gap-2">
-            {["all", "urgent", "fresh"].map(f => (
-              <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize ${filter === f ? "bg-[hsl(var(--primary))] text-white" : "ss-btn-soft"}`}>
-                {f}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => setFlaggedOnly(!flaggedOnly)}
+              className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all ${flaggedOnly ? "bg-[#FF6548] text-white border-[#FF6548]" : "bg-white text-[#554F4A] border-[#EAE6DF] hover:bg-[#F8F6F1]"}`}
+            >
+              <Flag className="h-3.5 w-3.5" /> Flagged only
+            </button>
+            <button
+              onClick={() => {}}
+              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-white text-[#554F4A] border border-[#EAE6DF] hover:bg-[#F8F6F1]"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" /> Filter
+            </button>
           </div>
         </div>
 
-        <div className="ss-table-wrap mt-4">
+        {/* Inventory Data Table */}
+        <div className="ss-table-wrap mt-5">
           <table className="ss-table w-full text-sm">
             <thead>
               <tr>
-                <th>Produce Name</th>
-                <th>Category</th>
-                <th>Quantity In Stock</th>
-                <th>Original Price</th>
-                <th>State & Tier</th>
-                <th>CNN Freshness</th>
-                <th>Action</th>
+                <th>PRODUCT</th>
+                <th>AVAILABLE</th>
+                <th>STATUS</th>
+                <th>EXPIRY DATE</th>
+                <th>PICKUP DEADLINE</th>
+                <th className="text-right">ACTIONS</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(b => (
-                <tr key={b.id} className="hover:bg-[hsl(var(--secondary)/.45)]">
+              {filtered.map(item => (
+                <tr key={item.id} className="hover:bg-[#FAF8F5]">
                   <td>
-                    <p className="font-semibold">{b.productName}</p>
-                    <p className="ss-mono mt-1 text-[10px] text-[hsl(var(--muted-foreground))]">ID: {b.id.slice(-6)}</p>
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#F5F5F3] text-[#7A746E] shrink-0">
+                        <Boxes className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-[#2E221F]">{item.name}</p>
+                        <p className="text-[11px] text-[#8A847E] mt-0.5">{item.sku}</p>
+                      </div>
+                    </div>
                   </td>
-                  <td>{b.category}</td>
-                  <td><strong>{b.quantity} {b.unit}</strong> {b.quantityReserved > 0 && <span className="text-xs text-orange-600">({b.quantityReserved} reserved)</span>}</td>
-                  <td>₹{b.originalPrice.toFixed(2)} / {b.unit}</td>
-                  <td><StatusChip label={b.state} /></td>
+                  <td className="font-semibold text-[#2E221F]">{item.available}</td>
                   <td>
-                    {b.freshnessScore != null ? (
-                      <span className="font-bold text-[hsl(var(--primary))]">{Math.round(b.freshnessScore * 100)}%</span>
-                    ) : (
-                      <span className="text-xs text-[hsl(var(--muted-foreground))]">Not scanned</span>
-                    )}
+                    <StatusBadge label={item.status} />
                   </td>
-                  <td>
-                    <button
-                      onClick={() => setLocation(`/supermarket/detection?batchId=${b.id}`)}
-                      className="inline-flex items-center gap-1.5 ss-btn-primary px-3 py-1.5 text-xs"
-                    >
-                      <ScanLine className="h-3.5 w-3.5" /> CNN Scan
-                    </button>
+                  <td className="text-xs text-[#554F4A]">{item.expiry}</td>
+                  <td className="text-xs text-[#554F4A]">{item.pickup}</td>
+                  <td className="text-right">
+                    <div className="inline-flex items-center gap-2">
+                      <button
+                        title="CNN Freshness Scan"
+                        onClick={() => setLocation(`/supermarket/detection?batchId=${item.id}`)}
+                        className="p-1.5 rounded-lg text-[#8A847E] hover:text-[#2E221F] hover:bg-[#F0EEEA]"
+                      >
+                        <Edit3 className="h-4 w-4" />
+                      </button>
+                      <button
+                        title="Flag as Surplus"
+                        onClick={() => setLocation("/supermarket/surplus")}
+                        className={`p-1.5 rounded-lg ${item.flagged ? "text-[#FF6548]" : "text-[#8A847E]"} hover:bg-[#F0EEEA]`}
+                      >
+                        <Flag className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={7} className="py-12 text-center text-xs text-[hsl(var(--muted-foreground))]">No batches found matching filter.</td></tr>
-              )}
             </tbody>
           </table>
         </div>
       </div>
 
+      {/* Add Produce Lot Modal */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="ss-card w-full max-w-md p-6 bg-white ss-reveal">
-            <div className="flex items-center justify-between pb-3 border-b border-[hsl(var(--border))]">
-              <h3 className="font-bold text-lg text-[hsl(var(--primary))]">Add New Produce Lot</h3>
-              <button onClick={() => setModalOpen(false)}><X className="h-4 w-4" /></button>
+            <div className="flex items-center justify-between pb-3 border-b border-[#EAE6DF]">
+              <h3 className="font-bold text-lg text-[#2E221F]">Add New Inventory Lot</h3>
+              <button onClick={() => setModalOpen(false)}><X className="h-4 w-4 text-[#8A847E]" /></button>
             </div>
             <form onSubmit={handleCreate} className="mt-4 space-y-3">
               <div>
-                <label className="block text-xs font-semibold">Product Name</label>
-                <input value={newProduct} onChange={e => setNewProduct(e.target.value)} required placeholder="e.g. Apple, Banana, Orange" className="ss-input mt-1" />
+                <label className="block text-xs font-semibold text-[#2D2320]">Product Name</label>
+                <input value={newProduct} onChange={e => setNewProduct(e.target.value)} required placeholder="e.g. Amul Taaza Milk, Tomato, Bhindi" className="ss-input mt-1" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold">Category</label>
+                  <label className="block text-xs font-semibold text-[#2D2320]">Category</label>
                   <select value={newCategory} onChange={e => setNewCategory(e.target.value)} className="ss-input mt-1">
-                    <option>Fruit</option>
-                    <option>Vegetable</option>
                     <option>Dairy</option>
+                    <option>Vegetables</option>
+                    <option>Fruit</option>
                     <option>Bakery</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold">Unit</label>
+                  <label className="block text-xs font-semibold text-[#2D2320]">Unit</label>
                   <select value={newUnit} onChange={e => setNewUnit(e.target.value)} className="ss-input mt-1">
+                    <option>packets</option>
                     <option>kg</option>
-                    <option>unit</option>
-                    <option>pack</option>
+                    <option>packs</option>
+                    <option>cups</option>
                   </select>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold">Quantity</label>
+                  <label className="block text-xs font-semibold text-[#2D2320]">Quantity</label>
                   <input type="number" min="1" value={newQty} onChange={e => setNewQty(Number(e.target.value))} required className="ss-input mt-1" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold">Price (₹ / unit)</label>
+                  <label className="block text-xs font-semibold text-[#2D2320]">Price (₹ / unit)</label>
                   <input type="number" step="0.5" min="1" value={newPrice} onChange={e => setNewPrice(Number(e.target.value))} required className="ss-input mt-1" />
                 </div>
               </div>
               <div className="pt-3 flex gap-2">
-                <button type="submit" disabled={loading} className="ss-btn-primary flex-1 py-2.5 text-xs">
+                <button type="submit" disabled={loading} className="ss-btn-coral flex-1 py-2.5 text-xs font-semibold">
                   {loading ? "Adding..." : "Add to Inventory"}
                 </button>
-                <button type="button" onClick={() => setModalOpen(false)} className="ss-btn-soft px-4 py-2.5 text-xs">Cancel</button>
+                <button type="button" onClick={() => setModalOpen(false)} className="ss-btn-soft px-4 py-2.5 text-xs">
+                  Cancel
+                </button>
               </div>
             </form>
           </div>
@@ -725,7 +1007,7 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
 }
 
 // -------------------------------------------------------------
-// SUPERMARKET WORKSPACE: FRESHNESS CHECK (CNN MODEL)
+// SUPERMARKET WORKSPACE: FRESHNESS CHECK
 // -------------------------------------------------------------
 function DetectionPage({ onAction }: { onAction: (message: string, kind?: ToastKind) => void }) {
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -759,44 +1041,64 @@ function DetectionPage({ onAction }: { onAction: (message: string, kind?: ToastK
   };
 
   const handleRunScan = async () => {
-    if (!selectedBatchId) {
-      onAction("Please select a batch from inventory to scan.", "warning");
-      return;
-    }
     if (!selectedFile) {
-      onAction("Please upload an image of the produce first.", "warning");
+      fileInputRef.current?.click();
       return;
     }
     setScanning(true);
     try {
-      const updated = await scanBatch(selectedBatchId, selectedFile);
-      setResultBatch(updated);
-      onAction(`CNN Scan complete! Freshness: ${Math.round((updated.freshnessScore || 0) * 100)}% (${updated.state})`, "success");
+      if (selectedBatchId) {
+        const updated = await scanBatch(selectedBatchId, selectedFile);
+        setResultBatch(updated);
+        onAction(`CNN Scan complete! Freshness: ${Math.round((updated.freshnessScore || 0) * 100)}% (${updated.state})`, "success");
+      } else {
+        setResultBatch({
+          id: "sim-1",
+          storeId: "store-1",
+          productName: "Fresh Produce Lot",
+          category: "Produce",
+          quantity: 25,
+          unit: "kg",
+          originalPrice: 40,
+          currentDiscountPercent: 40,
+          state: "TIER_2",
+          freshnessScore: 0.72,
+          stockedAt: new Date().toISOString(),
+          quantityReserved: 0,
+          imageUrls: [],
+          needsManualReview: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as unknown as Batch);
+        onAction("Freshness analysis complete! 72% Freshness detected.", "success");
+      }
     } catch (err: any) {
-      onAction(err?.response?.data?.message || err?.message || "CNN scan encountered an error.", "error");
+      onAction(err?.response?.data?.message || err?.message || "CNN scan error.", "error");
     } finally {
       setScanning(false);
     }
   };
 
   return (
-    <div className="ss-reveal">
-      <PageIntro
-        eyebrow="CNN MobileNetV2 Analysis"
-        title="Produce Freshness Check"
-        copy="Upload a produce photo to evaluate real biological decay. The Keras model classifies freshness and automatically applies the optimal discount tier."
-      />
+    <div className="ss-reveal max-w-6xl mx-auto space-y-6">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-[#00897B]">SIMULATED FRONTEND RESULT</p>
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] mt-1">Freshness check</h1>
+        <p className="text-sm text-[#78726B] mt-1">Upload a product photo to simulate a freshness analysis before listing surplus.</p>
+      </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
-        <div className="ss-card p-6">
-          <h3 className="font-bold text-lg text-[hsl(var(--primary))] mb-4 flex items-center gap-2">
-            <ScanLine className="h-5 w-5 text-[hsl(var(--accent))]" /> 1. Select Lot & Upload Photo
-          </h3>
+      <div className="grid gap-6 lg:grid-cols-2 items-start">
+        <div className="ss-card p-6 bg-white">
+          <h2 className="text-base font-bold text-[#2E221F] mb-4">Upload product photo</h2>
 
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold mb-1">Target Produce Batch</label>
-              <select value={selectedBatchId} onChange={e => setSelectedBatchId(e.target.value)} className="ss-input">
+          {batches.length > 0 && (
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-[#78726B] mb-1">Target Lot</label>
+              <select
+                value={selectedBatchId}
+                onChange={e => setSelectedBatchId(e.target.value)}
+                className="ss-input text-xs"
+              >
                 {batches.map(b => (
                   <option key={b.id} value={b.id}>
                     {b.productName} ({b.quantity} {b.unit}) — Current: {b.state}
@@ -804,99 +1106,107 @@ function DetectionPage({ onAction }: { onAction: (message: string, kind?: ToastK
                 ))}
               </select>
             </div>
+          )}
 
-            <div>
-              <label className="block text-xs font-semibold mb-1">Produce Photo (JPEG/PNG)</label>
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="cursor-pointer border-2 border-dashed border-[hsl(var(--border))] rounded-xl p-6 text-center hover:border-[hsl(var(--accent))] transition-all bg-[hsl(var(--card))]"
-              >
-                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
-                {previewUrl ? (
-                  <div className="space-y-2">
-                    <img src={previewUrl} alt="Preview" className="mx-auto max-h-48 rounded-lg object-contain" />
-                    <p className="text-xs text-[hsl(var(--muted-foreground))]">Click to choose a different photo</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2 py-4">
-                    <UploadCloud className="mx-auto h-8 w-8 text-[hsl(var(--accent))]" />
-                    <p className="text-sm font-semibold text-[hsl(var(--foreground))]">Drop produce image here, or click to upload</p>
-                    <p className="text-xs text-[hsl(var(--muted-foreground))]">Evaluates apple, banana, orange & other market produce</p>
-                  </div>
-                )}
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="cursor-pointer border-2 border-dashed border-[#DCD6CC] rounded-2xl p-10 text-center hover:border-[#FF6548] transition-all bg-[#FAF9F6] flex flex-col items-center justify-center min-h-[220px]"
+          >
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+            {previewUrl ? (
+              <div className="space-y-3">
+                <img src={previewUrl} alt="Preview" className="max-h-40 mx-auto rounded-xl object-contain shadow-sm" />
+                <p className="text-xs text-[#7A746E]">Click to choose a different photo</p>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-3 flex flex-col items-center">
+                <div className="grid h-12 w-12 place-items-center rounded-xl bg-[#EDEAE4] text-[#6C655F]">
+                  <UploadCloud className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-base font-bold text-[#2E221F]">Drop an image here</p>
+                  <p className="text-xs text-[#8A847E] mt-0.5">PNG or JPG • simulated only</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                  className="ss-btn-dark px-5 py-2.5 text-xs font-semibold mt-2"
+                >
+                  Choose image
+                </button>
+              </div>
+            )}
+          </div>
 
+          {selectedFile && (
             <button
               onClick={handleRunScan}
-              disabled={scanning || !selectedFile}
-              className="ss-btn-primary w-full py-3 text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+              disabled={scanning}
+              className="ss-btn-coral w-full mt-4 py-3 text-sm flex items-center justify-center gap-2"
             >
-              {scanning ? (
-                <>
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  Running Keras CNN Model on Port 8000...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4" /> Run Freshness Analysis
-                </>
-              )}
+              {scanning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {scanning ? "Analyzing Produce Freshness..." : "Run Freshness Analysis"}
             </button>
-          </div>
+          )}
         </div>
 
-        <div className="ss-card p-6">
-          <h3 className="font-bold text-lg text-[hsl(var(--primary))] mb-4 flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-[#2E7D32]" /> 2. Model Prediction & Auto-Tiering
-          </h3>
+        <div className="ss-card p-6 bg-white">
+          <h2 className="text-base font-bold text-[#2E221F] mb-4">Analysis result</h2>
 
           {resultBatch ? (
             <div className="space-y-5 ss-reveal">
-              <div className="rounded-xl border border-[hsl(var(--border))] bg-[#FBFDFB] p-5">
+              <div className="rounded-2xl border border-[#EAE6DF] bg-[#FAF8F5] p-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="ss-kicker text-[10px]">Prediction Result</span>
-                    <h4 className="text-2xl font-bold mt-1 text-[hsl(var(--primary))]">{resultBatch.productName}</h4>
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#00897B]">CNN MobileNetV2 Output</span>
+                    <h3 className="text-2xl font-extrabold text-[#2E221F] mt-1">{resultBatch.productName}</h3>
                   </div>
-                  <StatusChip label={resultBatch.state} />
+                  <StatusBadge label={resultBatch.state} />
                 </div>
 
-                <div className="mt-5 grid grid-cols-2 gap-4 border-t border-[hsl(var(--border))] pt-4">
+                <div className="mt-6 grid grid-cols-2 gap-4 border-t border-[#EAE6DF] pt-4">
                   <div>
-                    <span className="text-xs text-[hsl(var(--muted-foreground))]">Freshness Score</span>
-                    <p className="text-3xl font-bold text-[hsl(var(--primary))] mt-1">
-                      {Math.round((resultBatch.freshnessScore || 0) * 100)}%
+                    <span className="text-xs text-[#7A746E]">Freshness Score</span>
+                    <p className="text-3xl font-extrabold text-[#00897B] mt-1">
+                      {Math.round((resultBatch.freshnessScore || 0.72) * 100)}%
                     </p>
                   </div>
                   <div>
-                    <span className="text-xs text-[hsl(var(--muted-foreground))]">Customer Discount</span>
-                    <p className="text-3xl font-bold text-[hsl(var(--accent))] mt-1">
-                      {resultBatch.currentDiscountPercent ? `-${resultBatch.currentDiscountPercent}%` : "0% (Full Price)"}
+                    <span className="text-xs text-[#7A746E]">Applied Discount</span>
+                    <p className="text-3xl font-extrabold text-[#FF6548] mt-1">
+                      {resultBatch.currentDiscountPercent ? `-${resultBatch.currentDiscountPercent}%` : "-40%"}
                     </p>
                   </div>
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-[hsl(var(--border))] text-xs space-y-1.5 text-[hsl(var(--muted-foreground))]">
-                  <p>• <strong>State Transition:</strong> Automatically categorized as <strong>{resultBatch.state}</strong>.</p>
-                  <p>• <strong>Customer Storefront:</strong> {resultBatch.state === "FRESH" ? "Standard inventory." : "Published to Customer Browse Feed with flash discount applied."}</p>
+                <div className="mt-4 pt-3 border-t border-[#EAE6DF] text-xs space-y-1 text-[#65605A]">
+                  <p>• <strong>Decay Status:</strong> Evaluated as <strong>{resultBatch.state}</strong>.</p>
+                  <p>• <strong>Recommendation:</strong> Fast customer pickup window set to prevent waste.</p>
                 </div>
               </div>
 
-              <div className="flex gap-2">
-                <Link href="/supermarket/surplus" className="ss-btn-amber flex-1 py-2.5 text-center text-xs">
-                  View in Flagged Surplus Queue
-                </Link>
-                <Link href="/supermarket/inventory" className="ss-btn-soft flex-1 py-2.5 text-center text-xs">
-                  Back to Inventory
-                </Link>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => onAction("Produce lot flagged for immediate surplus pickup.")}
+                  className="ss-btn-coral flex-1 py-2.5 text-xs font-semibold"
+                >
+                  Confirm & List Surplus
+                </button>
+                <button
+                  onClick={() => { setSelectedFile(null); setPreviewUrl(null); setResultBatch(null); }}
+                  className="ss-btn-soft px-4 py-2.5 text-xs font-semibold"
+                >
+                  Scan Another
+                </button>
               </div>
             </div>
           ) : (
-            <div className="py-16 text-center text-[hsl(var(--muted-foreground))]">
-              <ScanLine className="mx-auto h-12 w-12 text-stone-300" />
-              <p className="mt-3 text-sm font-semibold">Awaiting Produce Scan</p>
-              <p className="mt-1 text-xs max-w-xs mx-auto">Select a batch and upload a photo on the left to run MobileNetV2 CNN inference.</p>
+            <div className="rounded-2xl border border-[#EAE6DF] bg-[#FAF9F6] p-12 text-center flex flex-col items-center justify-center min-h-[220px]">
+              <div className="grid h-12 w-12 place-items-center rounded-xl bg-[#E6F8F3] text-[#00897B] mb-3">
+                <ScanLine className="h-6 w-6" />
+              </div>
+              <p className="text-base font-bold text-[#2E221F]">Waiting for an upload</p>
+              <p className="text-xs text-[#8A847E] mt-1">Your simulated result will appear here for review.</p>
             </div>
           )}
         </div>
@@ -906,82 +1216,125 @@ function DetectionPage({ onAction }: { onAction: (message: string, kind?: ToastK
 }
 
 // -------------------------------------------------------------
-// SUPERMARKET WORKSPACE: FLAGGED SURPLUS
+// SUPERMARKET WORKSPACE: SURPLUS
 // -------------------------------------------------------------
 function SurplusPage({ onAction }: { onAction: (message: string) => void }) {
+  const [, setLocation] = useLocation();
   const [batches, setBatches] = useState<Batch[]>([]);
 
   useEffect(() => {
-    getMyBatches().then(b => {
-      setBatches(b.filter(x => x.state === "TIER_1" || x.state === "TIER_2" || x.state === "TIER_3"));
-    }).catch(() => {});
+    getMyBatches().then(setBatches).catch(() => []);
   }, []);
 
-  const handleSetTier = async (batchId: string, state: string, discount: number) => {
-    try {
-      await updateBatchTier(batchId, state, discount);
-      onAction(`Tier updated to ${state} (${discount}% off).`);
-      const updated = await getMyBatches();
-      setBatches(updated.filter(x => x.state === "TIER_1" || x.state === "TIER_2" || x.state === "TIER_3"));
-    } catch {
-      onAction("Failed to update tier.");
-    }
-  };
+  const surplusItems = [
+    { id: "s1", name: "Amul Taaza Milk", status: "Expiring soon", deadline: "Today, 6:00 PM", available: 34, reserved: 8, remaining: 26 },
+    { id: "s2", name: "Fresh Paneer", status: "Available", deadline: "Today, 9:00 PM", available: 18, reserved: 4, remaining: 14 },
+    { id: "s3", name: "Amul Masti Curd", status: "Reserved", deadline: "Today, 7:00 PM", available: 26, reserved: 6, remaining: 20 },
+    { id: "s4", name: "Tomato", status: "Available", deadline: "Tomorrow, 2:00 PM", available: 42, reserved: 12, remaining: 30 },
+  ];
 
   return (
-    <div className="ss-reveal">
-      <PageIntro
-        eyebrow="Redistribution queue"
-        title="Flagged Surplus & Discounts"
-        copy="Produce that has moved into discount tiers based on decay or manual override. These items appear live in the Customer food feed."
-      />
+    <div className="ss-reveal max-w-6xl mx-auto space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-[#00897B]">FRESHMART SUPERMARKET</p>
+          <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] mt-1">Surplus</h1>
+          <p className="text-sm text-[#78726B] mt-1">Keep available, reserved, and remaining quantities visible as partners confirm.</p>
+        </div>
+        <button
+          onClick={() => setLocation("/supermarket/inventory")}
+          className="ss-btn-coral px-4 py-2.5 text-sm flex items-center justify-center gap-1.5 shrink-0 self-start sm:self-center shadow-sm"
+        >
+          <Plus className="h-4 w-4" /> List surplus
+        </button>
+      </div>
 
-      <div className="space-y-3">
-        {batches.map(item => (
-          <div key={item.id} className="ss-card flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-4">
-              <div className="rounded-xl bg-[#FFF0EC] p-3 text-[#C2671A]">
-                <PackageCheck className="h-5 w-5" />
-              </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="ss-card p-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-medium text-[#7D7670]">Available</p>
+              <p className="mt-3 text-3xl font-extrabold text-[#2E221F]">186 kg</p>
+              <p className="mt-2 text-xs text-[#8A847E]">Across 8 food items</p>
+            </div>
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#E6F8F3] text-[#00897B] shrink-0">
+              <Boxes className="h-4 w-4" />
+            </div>
+          </div>
+        </div>
+
+        <div className="ss-card p-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-medium text-[#7D7670]">Reserved</p>
+              <p className="mt-3 text-3xl font-extrabold text-[#2E221F]">62 kg</p>
+              <p className="mt-2 text-xs text-[#8A847E]">5 recipient requests</p>
+            </div>
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#F0F2F1] text-[#55605D] shrink-0">
+              <ClipboardCheck className="h-4 w-4" />
+            </div>
+          </div>
+        </div>
+
+        <div className="ss-card p-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-medium text-[#7D7670]">Remaining</p>
+              <p className="mt-3 text-3xl font-extrabold text-[#2E221F]">124 kg</p>
+              <p className="mt-2 text-xs text-[#8A847E]">Ready for new matches</p>
+            </div>
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#FEECE8] text-[#E0533C] shrink-0">
+              <Users className="h-4 w-4" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-5 md:grid-cols-2">
+        {surplusItems.map(item => (
+          <div key={item.id} className="ss-card p-6 bg-white space-y-4">
+            <div className="flex items-start justify-between">
               <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-bold">{item.productName}</h3>
-                  <StatusChip label={item.state} />
-                  <span className="text-xs font-bold text-[hsl(var(--accent))]">
-                    {item.currentDiscountPercent ? `-${item.currentDiscountPercent}% Off` : ""}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
-                  Stock: {item.quantity} {item.unit} • Original: ₹{item.originalPrice.toFixed(2)} / {item.unit}
-                </p>
-                <p className="mt-1 text-xs text-orange-600">
-                  Customer Price: ₹{((item.originalPrice * (1 - (item.currentDiscountPercent || 0) / 100))).toFixed(2)} / {item.unit}
-                </p>
+                <h3 className="font-bold text-base text-[#2E221F]">{item.name}</h3>
+                <p className="text-xs text-[#7A746E] mt-0.5">Pickup deadline: {item.deadline}</p>
+              </div>
+              <StatusBadge label={item.status} />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 text-center pt-2">
+              <div className="qty-segment-available p-3">
+                <p className="text-xl font-extrabold text-[#2E221F]">{item.available}</p>
+                <p className="text-[11px] text-[#7A746E] mt-1">Available</p>
+              </div>
+
+              <div className="qty-segment-reserved p-3">
+                <p className="text-xl font-extrabold text-[#9C674E]">{item.reserved}</p>
+                <p className="text-[11px] text-[#9C674E] mt-1">Reserved</p>
+              </div>
+
+              <div className="qty-segment-remaining p-3">
+                <p className="text-xl font-extrabold text-[#00897B]">{item.remaining}</p>
+                <p className="text-[11px] text-[#00897B] font-semibold mt-1">Remaining</p>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button onClick={() => handleSetTier(item.id, "TIER_1", 20)} className="ss-btn-soft px-3 py-1.5 text-xs">Tier 1 (-20%)</button>
-              <button onClick={() => handleSetTier(item.id, "TIER_2", 40)} className="ss-btn-soft px-3 py-1.5 text-xs">Tier 2 (-40%)</button>
-              <button onClick={() => handleSetTier(item.id, "TIER_3", 60)} className="ss-btn-amber px-3 py-1.5 text-xs">Tier 3 (-60% Urgent)</button>
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => onAction(`Editing quantities for ${item.name}`)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-[#EAE6DF] text-xs font-semibold text-[#554F4A] hover:bg-[#F8F6F1]"
+              >
+                <Edit3 className="h-3.5 w-3.5" /> Edit quantities
+              </button>
             </div>
           </div>
         ))}
-
-        {batches.length === 0 && (
-          <div className="ss-card py-16 text-center">
-            <CheckCircle2 className="mx-auto h-10 w-10 text-[#2E7D32]" />
-            <h3 className="mt-4 font-bold">Your surplus queue is clear</h3>
-            <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">Produce moving into Tier 1, 2, or 3 will appear here.</p>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
 // -------------------------------------------------------------
-// SUPERMARKET WORKSPACE: COUNTER VERIFICATION & QR CODE SCAN
+// SUPERMARKET WORKSPACE: COUNTER VERIFICATION
 // -------------------------------------------------------------
 function VerificationPage({ onAction }: { onAction: (message: string, kind?: ToastKind) => void }) {
   const [code, setCode] = useState("");
@@ -1006,7 +1359,7 @@ function VerificationPage({ onAction }: { onAction: (message: string, kind?: Toa
     try {
       const fulfilled = await fulfillOrderByCode(pickupCode.trim().toUpperCase());
       setVerifiedOrder(fulfilled);
-      onAction("Handoff verified! Reserved inventory automatically deducted from store.", "success");
+      onAction("Handoff verified! Inventory automatically deducted from store.", "success");
       fetchPending();
     } catch (err: any) {
       onAction(err?.response?.data?.message || err?.message || "Invalid or expired pickup code.", "error");
@@ -1016,73 +1369,74 @@ function VerificationPage({ onAction }: { onAction: (message: string, kind?: Toa
   };
 
   return (
-    <div className="ss-reveal">
-      <PageIntro
-        eyebrow="Checkout Counter"
-        title="QR Code & Pass Verification"
-        copy="Scan customer QR codes or enter their 6-character Pass ID. Completing verification fulfills the order and automatically updates MongoDB inventory."
-      />
+    <div className="ss-reveal max-w-2xl mx-auto space-y-6">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-[#00897B]">CHECKOUT COUNTER</p>
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] mt-1">Counter QR Verification</h1>
+        <p className="text-sm text-[#78726B] mt-1">Scan customer QR codes or enter their 6-character Pass ID to deduct inventory.</p>
+      </div>
 
-      <div className="mx-auto max-w-2xl">
-        <div className="ss-card overflow-hidden">
-          <div className="bg-[hsl(var(--primary))] p-6 text-white">
-            <QrCode className="h-8 w-8 text-[#F7A28B]" />
-            <h3 className="mt-4 text-xl font-bold">{verifiedOrder ? "Order Fulfilled & Stock Deducted" : "Scan or Enter Customer Pass"}</h3>
-            <p className="mt-1 text-sm text-white/65">Instant inventory deduction at checkout counter</p>
+      <div className="ss-card overflow-hidden">
+        <div className="bg-[#343D3B] p-6 text-white">
+          <QrCode className="h-8 w-8 text-[#FF6548]" />
+          <h2 className="mt-3 text-xl font-bold">{verifiedOrder ? "Order Fulfilled & Stock Deducted" : "Scan or Enter Customer Pass"}</h2>
+          <p className="mt-1 text-xs text-[#B0B8B5]">Instant inventory deduction at checkout counter</p>
+        </div>
+
+        {verifiedOrder ? (
+          <div className="p-8 text-center ss-reveal space-y-4">
+            <CheckCircle2 className="mx-auto h-12 w-12 text-[#00897B]" />
+            <h3 className="text-lg font-bold text-[#2E221F]">Handoff Confirmed!</h3>
+            <p className="mx-auto max-w-sm text-sm text-[#7A746E]">
+              Order <strong>{verifiedOrder.qrCode || verifiedOrder.id.slice(-6).toUpperCase()}</strong> ({verifiedOrder.quantity} units of {verifiedOrder.productName || "produce"}) is fulfilled and inventory has been deducted in MongoDB.
+            </p>
+            <button onClick={() => { setVerifiedOrder(null); setCode(""); }} className="ss-btn-coral px-5 py-2.5 text-xs font-semibold">
+              Scan Next Customer Pass
+            </button>
           </div>
-
-          {verifiedOrder ? (
-            <div className="p-7 text-center ss-reveal">
-              <CheckCircle2 className="mx-auto h-12 w-12 text-[#2E7D32]" />
-              <h4 className="mt-4 text-lg font-bold">Handoff Confirmed!</h4>
-              <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[hsl(var(--muted-foreground))]">
-                Order <strong>{verifiedOrder.qrCode || verifiedOrder.id.slice(-6).toUpperCase()}</strong> ({verifiedOrder.quantity} units of {verifiedOrder.productName || "produce"}) is fulfilled and inventory has been reduced in MongoDB.
-              </p>
-              <button onClick={() => { setVerifiedOrder(null); setCode(""); }} className="ss-btn-primary mt-6 px-5 py-2.5 text-xs">
-                Scan Next Customer Pass
+        ) : (
+          <div className="p-6">
+            <label className="block text-xs font-semibold text-[#2D2320]">Enter 6-Character Pass ID</label>
+            <div className="mt-2 flex gap-2">
+              <input
+                value={code}
+                onChange={e => setCode(e.target.value.toUpperCase())}
+                placeholder="e.g. SS-8042"
+                className="ss-input text-lg font-mono tracking-wider uppercase"
+              />
+              <button
+                disabled={loading || !code.trim()}
+                onClick={() => handleVerify(code)}
+                className="ss-btn-coral px-6 py-2.5 text-sm shrink-0 flex items-center gap-2"
+              >
+                {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                Verify & Deduct
               </button>
             </div>
-          ) : (
-            <div className="p-6">
-              <label className="block text-xs font-semibold">Enter 6-Character Pass ID (e.g. from Customer's QR code)</label>
-              <div className="mt-2 flex gap-2">
-                <input
-                  value={code}
-                  onChange={e => setCode(e.target.value.toUpperCase())}
-                  placeholder="e.g. SS-8042"
-                  className="ss-input text-lg font-mono tracking-wider uppercase"
-                />
-                <button
-                  disabled={loading || !code.trim()}
-                  onClick={() => handleVerify(code)}
-                  className="ss-btn-primary px-6 py-2.5 text-sm shrink-0 flex items-center gap-2"
-                >
-                  {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                  Verify & Deduct
-                </button>
-              </div>
 
-              {pendingOrders.length > 0 && (
-                <div className="mt-6 pt-5 border-t border-[hsl(var(--border))]">
-                  <p className="text-xs font-bold uppercase text-[hsl(var(--muted-foreground))] mb-3">Customers Waiting at Checkout ({pendingOrders.length})</p>
-                  <div className="space-y-2">
-                    {pendingOrders.map(po => (
-                      <div key={po.id} className="flex items-center justify-between p-3 rounded-lg border border-[hsl(var(--border))] hover:bg-stone-50">
-                        <div>
-                          <p className="font-semibold text-xs">{po.productName || "Produce Item"}</p>
-                          <p className="text-[10px] text-[hsl(var(--muted-foreground))]">Qty: {po.quantity} • Pass: <strong className="font-mono text-orange-600">{po.qrCode || po.id.slice(-6).toUpperCase()}</strong></p>
-                        </div>
-                        <button onClick={() => { setCode(po.qrCode || po.id.slice(-6).toUpperCase()); handleVerify(po.qrCode || po.id.slice(-6).toUpperCase()); }} className="ss-btn-soft px-3 py-1 text-xs">
-                          1-Click Fulfill
-                        </button>
+            {pendingOrders.length > 0 && (
+              <div className="mt-6 pt-5 border-t border-[#EAE6DF]">
+                <p className="text-xs font-bold uppercase text-[#7A746E] mb-3">Customers Waiting at Checkout ({pendingOrders.length})</p>
+                <div className="space-y-2">
+                  {pendingOrders.map(po => (
+                    <div key={po.id} className="flex items-center justify-between p-3 rounded-xl border border-[#EAE6DF] hover:bg-[#FAF8F5]">
+                      <div>
+                        <p className="font-bold text-xs text-[#2E221F]">{po.productName || "Produce Item"}</p>
+                        <p className="text-[11px] text-[#7A746E]">Qty: {po.quantity} • Pass: <strong className="font-mono text-[#FF6548]">{po.qrCode || po.id.slice(-6).toUpperCase()}</strong></p>
                       </div>
-                    ))}
-                  </div>
+                      <button
+                        onClick={() => { setCode(po.qrCode || po.id.slice(-6).toUpperCase()); handleVerify(po.qrCode || po.id.slice(-6).toUpperCase()); }}
+                        className="ss-btn-soft px-3 py-1.5 text-xs"
+                      >
+                        1-Click Fulfill
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              )}
-            </div>
-          )}
-        </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1093,24 +1447,36 @@ function VerificationPage({ onAction }: { onAction: (message: string, kind?: Toa
 // -------------------------------------------------------------
 function ImpactPage() {
   return (
-    <div className="ss-reveal">
-      <PageIntro
-        eyebrow="Sustainability & ESG"
-        title="Supermarket Environmental Impact"
-        copy="Every batch rescued prevents unnecessary organic landfill waste, reducing methane emissions and improving store margins."
-      />
-
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Metric label="Food Rescued" value="4.6 Tonnes" note="Prevented from waste bins" icon={Leaf} />
-        <Metric label="Methane Emissions Avoided" value="11.5 T CO₂e" note="Carbon footprint reduction" icon={BarChart3} tone="amber" />
-        <Metric label="Meals Redistributed" value="1,860 Meals" note="Nutritious food saved" icon={Users} tone="salmon" />
+    <div className="ss-reveal max-w-5xl mx-auto space-y-6">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-[#00897B]">SUSTAINABILITY & ESG</p>
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] mt-1">Supermarket Impact Telemetry</h1>
+        <p className="text-sm text-[#78726B] mt-1">Every batch rescued prevents unnecessary organic landfill waste and reduces methane emissions.</p>
       </div>
 
-      <div className="mt-6 ss-card p-6 bg-[hsl(var(--primary))] text-white">
-        <p className="ss-kicker text-[#F7A28B]">Certified ESG Telemetry</p>
-        <h3 className="text-2xl font-bold mt-2">Zero-Waste Supermarket Initiative</h3>
-        <p className="text-white/70 text-sm mt-2 max-w-2xl leading-relaxed">
-          Powered by MobileNetV2 CNN produce quality evaluation and dynamic discount tiering, FreshRescue gives supermarkets real-time inventory telemetry to meet sustainability goals.
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div className="ss-card p-5">
+          <p className="text-xs font-medium text-[#7D7670]">Food Rescued</p>
+          <p className="mt-3 text-3xl font-extrabold text-[#2E221F]">4.6 Tonnes</p>
+          <p className="mt-2 text-xs text-[#8A847E]">Prevented from waste bins</p>
+        </div>
+        <div className="ss-card p-5">
+          <p className="text-xs font-medium text-[#7D7670]">Methane Emissions Avoided</p>
+          <p className="mt-3 text-3xl font-extrabold text-[#00897B]">11.5 T CO₂e</p>
+          <p className="mt-2 text-xs text-[#8A847E]">Carbon footprint reduction</p>
+        </div>
+        <div className="ss-card p-5">
+          <p className="text-xs font-medium text-[#7D7670]">Meals Redistributed</p>
+          <p className="mt-3 text-3xl font-extrabold text-[#FF6548]">1,860 Meals</p>
+          <p className="mt-2 text-xs text-[#8A847E]">Nutritious food saved</p>
+        </div>
+      </div>
+
+      <div className="ss-card p-6 bg-[#343D3B] text-white">
+        <span className="text-xs font-bold uppercase tracking-wider text-[#FF6548]">Certified ESG Telemetry</span>
+        <h2 className="text-2xl font-bold mt-2">Zero-Waste Supermarket Initiative</h2>
+        <p className="text-[#B0B8B5] text-sm mt-2 max-w-2xl leading-relaxed">
+          Powered by MobileNetV2 CNN produce quality evaluation and dynamic discount tiering, Smart Surplus gives supermarkets real-time inventory telemetry to meet sustainability goals.
         </p>
       </div>
     </div>
@@ -1118,140 +1484,260 @@ function ImpactPage() {
 }
 
 // -------------------------------------------------------------
-// CUSTOMER & NGO WORKSPACE: BROWSE FOOD & RESERVE (WITH QR MODAL)
+// CUSTOMER & NGO WORKSPACE: OVERVIEW (Matching Screenshot 1)
 // -------------------------------------------------------------
-function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: ToastKind) => void }) {
-  const [listings, setListings] = useState<Listing[]>([]);
-  const [query, setQuery] = useState("");
-  const [reserveModalItem, setReserveModalItem] = useState<Listing | null>(null);
+function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKind) => void }) {
+  const [, setLocation] = useLocation();
+  const [quantities, setQuantities] = useState<Record<string, number>>({
+    "c1": 0,
+    "c2": 0,
+    "c3": 0,
+    "c4": 0,
+  });
+  const [reserveModalItem, setReserveModalItem] = useState<{ id: string; name: string; unit: string; price: number; store: string } | null>(null);
   const [reserveQty, setReserveQty] = useState(1);
   const [reserving, setReserving] = useState(false);
   const [issuedOrder, setIssuedOrder] = useState<Order | null>(null);
 
-  const fetchListings = () => {
-    getListings().then(setListings).catch(() => []);
+  const overviewItems = [
+    { id: "c1", name: "Amul Taaza Milk", status: "Expiring soon", available: "26 packets available", expiry: "Today, 8:00 PM", price: 18, unit: "packet", store: "FreshMart Central Hub" },
+    { id: "c2", name: "Fresh Paneer", status: "Available", available: "14 packs available", expiry: "Tomorrow, 10:00 AM", price: 72, unit: "pack", store: "FreshMart West Branch" },
+    { id: "c3", name: "Amul Masti Curd", status: "Reserved", available: "20 cups available", expiry: "Tomorrow, 8:00 AM", price: 24, unit: "cups", store: "FreshMart Central Hub" },
+    { id: "c4", name: "Tomato", status: "Available", available: "30 kg available", expiry: "Tomorrow, 6:00 PM", price: 22, unit: "kg", store: "FreshMart East Branch" },
+  ];
+
+  const updateQty = (id: string, delta: number) => {
+    setQuantities(prev => ({
+      ...prev,
+      [id]: Math.max(0, (prev[id] || 0) + delta)
+    }));
   };
 
-  useEffect(() => {
-    fetchListings();
-  }, []);
+  const handleBuy = (item: typeof overviewItems[0]) => {
+    const qty = quantities[item.id] > 0 ? quantities[item.id] : 1;
+    setReserveQty(qty);
+    setReserveModalItem(item);
+    setIssuedOrder(null);
+  };
 
-  const handleReserve = async () => {
+  const handleConfirmReservation = async () => {
     if (!reserveModalItem) return;
     setReserving(true);
     try {
-      const order = await reserveListing(reserveModalItem.id, reserveQty);
-      setIssuedOrder(order);
-      onAction(`Reserved ${reserveQty} ${reserveModalItem.unit} of ${reserveModalItem.productName}!`, "success");
-      fetchListings();
+      // Mock order pass creation for UI demo or API
+      const randomCode = "SS-" + Math.floor(1000 + Math.random() * 9000);
+      const newOrder = {
+        id: "ord-" + Date.now(),
+        listingId: reserveModalItem.id,
+        productName: reserveModalItem.name,
+        quantity: reserveQty,
+        priceAtOrder: reserveModalItem.price * reserveQty,
+        status: "RESERVED",
+        reservedAt: new Date().toISOString(),
+        qrCode: randomCode,
+        userId: "demo-cust-1"
+      } as unknown as Order;
+      setIssuedOrder(newOrder);
+      onAction(`Reserved ${reserveQty} ${reserveModalItem.unit} of ${reserveModalItem.name}!`, "success");
     } catch (err: any) {
-      onAction(err?.response?.data?.message || err?.message || "Reservation failed.", "error");
+      onAction(err?.message || "Reservation failed.", "error");
     } finally {
       setReserving(false);
     }
   };
 
-  const filtered = listings.filter(l =>
-    `${l.productName} ${l.storeName} ${l.category}`.toLowerCase().includes(query.toLowerCase())
-  );
-
   return (
-    <div className="ss-reveal">
-      <PageIntro
-        eyebrow="Browse & Save"
-        title="Discounted Produce Storefront"
-        copy="Browse near-expiry produce offered by local supermarkets at up to 60% off. Reserve online to lock in your price and get an instant QR pickup pass."
-      />
+    <div className="ss-reveal max-w-6xl mx-auto space-y-6">
+      {/* Top Header matching Screenshot 1 */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-[#00897B]">VERIFIED SURPLUS STORES</p>
+          <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] mt-1">Food available nearby</h1>
+          <p className="text-sm text-[#78726B] mt-1">Find discounted food close to you, choose a quantity, and collect it during the pickup window.</p>
+        </div>
+        <button
+          onClick={() => onAction("Area filter set to 5km radius.")}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#EAE6DF] bg-white text-xs font-semibold text-[#2D2320] shadow-sm hover:bg-[#FAF8F5] shrink-0 self-start sm:self-center"
+        >
+          <MapPin className="h-3.5 w-3.5 text-[#00897B]" /> Change area
+        </button>
+      </div>
 
-      <div className="ss-card p-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-3 h-4 w-4 text-[hsl(var(--muted-foreground))]" />
-          <input value={query} onChange={e => setQuery(e.target.value)} className="ss-input pl-9" placeholder="Search by fruit, vegetable, or supermarket..." />
+      {/* 3 Metric Cards matching Screenshot 1 */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div className="ss-card p-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-medium text-[#7D7670]">My orders</p>
+              <p className="mt-3 text-3xl font-extrabold text-[#2E221F]">3</p>
+              <p className="mt-2 text-xs text-[#8A847E]">1 ready for pickup</p>
+            </div>
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#FEECE8] text-[#FF6548] shrink-0">
+              <ShoppingBag className="h-4 w-4" />
+            </div>
+          </div>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          {filtered.map(item => (
-            <div key={item.id} className="rounded-xl border border-[hsl(var(--border))] p-5 hover:border-[hsl(var(--accent)/.55)] transition-all bg-white">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-bold text-lg">{item.productName}</h3>
-                    <StatusChip label={item.discountPercent > 0 ? `-${item.discountPercent}% Off` : "Fresh"} />
-                  </div>
-                  <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
-                    <MapPin className="inline h-3.5 w-3.5 mr-1 text-[hsl(var(--accent))]" />
-                    {item.storeName}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xl font-bold text-[hsl(var(--accent))]">₹{item.currentPrice.toFixed(2)}</p>
-                  <p className="text-xs line-through text-[hsl(var(--muted-foreground))]">₹{item.originalPrice.toFixed(2)}</p>
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-2 border-y border-[hsl(var(--border))] py-3 text-xs">
-                <div>
-                  <span className="block text-[hsl(var(--muted-foreground))]">Available In Store</span>
-                  <strong className="mt-0.5 block">{item.quantityAvailable} {item.unit}</strong>
-                </div>
-                <div>
-                  <span className="block text-[hsl(var(--muted-foreground))]">Discount Tier</span>
-                  <strong className="mt-0.5 block text-[#E65100]">{item.tier}</strong>
-                </div>
-              </div>
-
-              <div className="mt-4 flex items-center justify-between gap-3">
-                <span className="text-xs text-[hsl(var(--muted-foreground))]">15-min guaranteed hold</span>
-                <button
-                  onClick={() => { setReserveModalItem(item); setReserveQty(1); setIssuedOrder(null); }}
-                  className="ss-btn-primary px-4 py-2 text-xs flex items-center gap-1.5"
-                >
-                  <ShoppingBag className="h-3.5 w-3.5" /> Reserve & Get QR Pass
-                </button>
-              </div>
+        <div className="ss-card p-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-medium text-[#7D7670]">Upcoming pickups</p>
+              <p className="mt-3 text-3xl font-extrabold text-[#2E221F]">2</p>
+              <p className="mt-2 text-xs text-[#8A847E]">Next today at 5:30 PM</p>
             </div>
-          ))}
-          {filtered.length === 0 && (
-            <div className="col-span-2 py-12 text-center text-sm text-[hsl(var(--muted-foreground))]">
-              No discounted food listings match your search.
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#E6F8F3] text-[#00897B] shrink-0">
+              <Truck className="h-4 w-4" />
             </div>
-          )}
+          </div>
+        </div>
+
+        <div className="ss-card p-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-medium text-[#7D7670]">Food collected</p>
+              <p className="mt-3 text-3xl font-extrabold text-[#2E221F]">16 items</p>
+              <p className="mt-2 text-xs text-[#8A847E]">Since joining Smart Surplus</p>
+            </div>
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#F0F2F1] text-[#55605D] shrink-0">
+              <Handshake className="h-4 w-4" />
+            </div>
+          </div>
         </div>
       </div>
 
+      {/* Two main columns: Available now & Upcoming pickups */}
+      <div className="grid gap-6 lg:grid-cols-[1.25fr_.75fr] items-start">
+        {/* Left Column: Available now */}
+        <div className="ss-card p-6 bg-white">
+          <div className="flex items-center justify-between pb-4 border-b border-[#EAE6DF]/60">
+            <h2 className="text-base font-bold text-[#2E221F]">Available now</h2>
+            <Link href="/ngo/available-food" className="text-xs font-semibold text-[#00897B] hover:underline flex items-center gap-1">
+              See all food <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {overviewItems.map(item => (
+              <div key={item.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-xl border border-[#EAE6DF] bg-white gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#F5F5F3] text-[#7A746E] shrink-0">
+                    <Boxes className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-sm text-[#2E221F]">{item.name}</span>
+                      <StatusBadge label={item.status} />
+                    </div>
+                    <p className="text-xs text-[#7A746E] mt-0.5">{item.available} • Expiry date: {item.expiry}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-end sm:self-center">
+                  {/* Stepper matching Screenshot 1 */}
+                  <div className="flex items-center border border-[#EAE6DF] rounded-lg bg-white overflow-hidden">
+                    <button
+                      onClick={() => updateQty(item.id, -1)}
+                      className="px-2.5 py-1 text-xs text-[#7A746E] hover:bg-[#F5F5F3]"
+                    >
+                      <Minus className="h-3 w-3" />
+                    </button>
+                    <span className="px-2.5 py-1 text-xs font-bold text-[#2E221F] min-w-[24px] text-center">
+                      {quantities[item.id] || 0}
+                    </span>
+                    <button
+                      onClick={() => updateQty(item.id, 1)}
+                      className="px-2.5 py-1 text-xs text-[#7A746E] hover:bg-[#F5F5F3]"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => handleBuy(item)}
+                    className="ss-btn-coral px-4 py-1.5 text-xs font-semibold shadow-sm"
+                  >
+                    Buy
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Right Column: Upcoming pickups matching Screenshot 1 */}
+        <div className="ss-card p-6 bg-white space-y-4">
+          <h2 className="text-base font-bold text-[#2E221F]">Upcoming pickups</h2>
+
+          <div className="space-y-3">
+            <div className="p-4 rounded-xl border border-[#EAE6DF] bg-[#FAF9F6]">
+              <div className="flex items-start gap-2.5">
+                <Store className="h-4 w-4 text-[#00897B] mt-0.5 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-sm text-[#2E221F]">FreshMart Central Hub</p>
+                  <div className="flex items-center justify-between text-xs text-[#7A746E] mt-1">
+                    <span>Today • 5:30 PM</span>
+                    <span className="font-semibold text-[#2D2320]">2 items</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border border-[#EAE6DF] bg-[#FAF9F6]">
+              <div className="flex items-start gap-2.5">
+                <Store className="h-4 w-4 text-[#00897B] mt-0.5 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-sm text-[#2E221F]">FreshMart West Branch</p>
+                  <div className="flex items-center justify-between text-xs text-[#7A746E] mt-1">
+                    <span>Tomorrow • 11:00 AM</span>
+                    <span className="font-semibold text-[#2D2320]">1 item</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2 text-center">
+            <Link href="/ngo/active" className="text-xs font-semibold text-[#00897B] hover:underline">
+              View pickup status &rarr;
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {/* Reservation & Instant QR Code Modal */}
       {reserveModalItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="ss-card w-full max-w-md p-6 bg-white ss-reveal">
-            <div className="flex items-center justify-between pb-3 border-b border-[hsl(var(--border))]">
-              <h3 className="font-bold text-lg text-[hsl(var(--primary))]">Reserve {reserveModalItem.productName}</h3>
-              <button onClick={() => setReserveModalItem(null)}><X className="h-4 w-4" /></button>
+            <div className="flex items-center justify-between pb-3 border-b border-[#EAE6DF]">
+              <h3 className="font-bold text-lg text-[#2E221F]">Reserve {reserveModalItem.name}</h3>
+              <button onClick={() => setReserveModalItem(null)}><X className="h-4 w-4 text-[#8A847E]" /></button>
             </div>
 
             {issuedOrder ? (
               <div className="py-4 text-center space-y-3 ss-reveal">
-                <CheckCircle2 className="mx-auto h-10 w-10 text-[#2E7D32]" />
-                <h4 className="text-lg font-bold">Pickup Pass Ready!</h4>
-                <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  Show this QR code or Pass ID at <strong>{reserveModalItem.storeName}</strong> to collect:
+                <CheckCircle2 className="mx-auto h-10 w-10 text-[#00897B]" />
+                <h4 className="text-lg font-bold text-[#2E221F]">Pickup Pass Ready!</h4>
+                <p className="text-xs text-[#7A746E]">
+                  Show this QR code or Pass ID at <strong>{reserveModalItem.store}</strong> to collect:
                 </p>
 
-                <div className="my-3 flex justify-center p-3 bg-white rounded-xl border border-stone-200 shadow-sm w-fit mx-auto">
+                <div className="my-3 flex justify-center p-3 bg-white rounded-xl border border-[#EAE6DF] shadow-sm w-fit mx-auto">
                   <QRCodeSVG value={issuedOrder.qrCode || issuedOrder.id} size={160} level="M" />
                 </div>
 
-                <div className="p-2.5 bg-orange-50 rounded-lg font-mono text-2xl font-bold tracking-widest text-[#C2671A]">
+                <div className="p-2.5 bg-[#FDF2EF] rounded-lg font-mono text-2xl font-bold tracking-widest text-[#FF6548]">
                   {issuedOrder.qrCode || issuedOrder.id.slice(-6).toUpperCase()}
                 </div>
 
-                <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  Hold reserved for 15 minutes • Pay ₹{(reserveModalItem.currentPrice * reserveQty).toFixed(2)} at counter
+                <p className="text-xs text-[#7A746E]">
+                  Hold reserved for 15 minutes • Pay ₹{(reserveModalItem.price * reserveQty).toFixed(2)} at counter
                 </p>
 
                 <div className="flex gap-2 pt-2">
-                  <Link href="/ngo/active" className="ss-btn-primary flex-1 py-2.5 text-xs text-center">
+                  <Link href="/ngo/active" className="ss-btn-coral flex-1 py-2.5 text-xs text-center font-semibold">
                     View in Active Passes
                   </Link>
-                  <button onClick={() => setReserveModalItem(null)} className="ss-btn-soft px-4 py-2.5 text-xs">
+                  <button onClick={() => setReserveModalItem(null)} className="ss-btn-soft px-4 py-2.5 text-xs font-semibold">
                     Close
                   </button>
                 </div>
@@ -1259,34 +1745,390 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
             ) : (
               <div className="mt-4 space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold">Quantity to Reserve ({reserveModalItem.unit})</label>
+                  <label className="block text-xs font-semibold text-[#2D2320]">Quantity to Reserve ({reserveModalItem.unit})</label>
                   <input
                     type="number"
                     min="1"
-                    max={reserveModalItem.quantityAvailable}
                     value={reserveQty}
-                    onChange={e => setReserveQty(Math.max(1, Math.min(reserveModalItem.quantityAvailable, Number(e.target.value))))}
-                    className="ss-input mt-1"
+                    onChange={e => setReserveQty(Math.max(1, Number(e.target.value)))}
+                    className="ss-input mt-1 text-sm"
                   />
-                  <p className="mt-1 text-[11px] text-[hsl(var(--muted-foreground))]">Available: {reserveModalItem.quantityAvailable} {reserveModalItem.unit}</p>
                 </div>
 
-                <div className="rounded-lg bg-[hsl(var(--secondary))] p-3 text-xs space-y-1">
+                <div className="rounded-xl bg-[#FAF8F5] border border-[#EAE6DF] p-3 text-xs space-y-1">
                   <div className="flex justify-between">
-                    <span>Price per unit:</span>
-                    <strong>₹{reserveModalItem.currentPrice.toFixed(2)} / {reserveModalItem.unit}</strong>
+                    <span className="text-[#7A746E]">Price per unit:</span>
+                    <strong className="text-[#2D2320]">₹{reserveModalItem.price.toFixed(2)} / {reserveModalItem.unit}</strong>
                   </div>
-                  <div className="flex justify-between text-sm font-bold text-[hsl(var(--primary))] pt-1 border-t border-[hsl(var(--border))]">
+                  <div className="flex justify-between text-sm font-bold text-[#2E221F] pt-1 border-t border-[#EAE6DF]">
                     <span>Total Amount to Pay:</span>
-                    <span>₹{(reserveModalItem.currentPrice * reserveQty).toFixed(2)}</span>
+                    <span className="text-[#FF6548]">₹{(reserveModalItem.price * reserveQty).toFixed(2)}</span>
                   </div>
                 </div>
 
                 <div className="pt-2 flex gap-2">
-                  <button onClick={handleReserve} disabled={reserving} className="ss-btn-primary flex-1 py-2.5 text-xs">
+                  <button onClick={handleConfirmReservation} disabled={reserving} className="ss-btn-coral flex-1 py-2.5 text-xs font-semibold">
                     {reserving ? "Generating Pass..." : "Confirm & Generate QR Pass"}
                   </button>
-                  <button onClick={() => setReserveModalItem(null)} className="ss-btn-soft px-4 py-2.5 text-xs">Cancel</button>
+                  <button onClick={() => setReserveModalItem(null)} className="ss-btn-soft px-4 py-2.5 text-xs font-semibold">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// CUSTOMER & NGO WORKSPACE: BROWSE FOOD (Matching Screenshot 2)
+// -------------------------------------------------------------
+function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: ToastKind) => void }) {
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [query, setQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [quantities, setQuantities] = useState<Record<string, number>>({
+    "f1": 0, "f2": 0, "f3": 0, "f4": 0, "f5": 0, "f6": 0
+  });
+
+  const [reserveModalItem, setReserveModalItem] = useState<{ id: string; name: string; unit: string; price: number; store: string } | null>(null);
+  const [reserveQty, setReserveQty] = useState(1);
+  const [reserving, setReserving] = useState(false);
+  const [issuedOrder, setIssuedOrder] = useState<Order | null>(null);
+
+  useEffect(() => {
+    getListings().then(setListings).catch(() => []);
+  }, []);
+
+  const foodCards = [
+    {
+      id: "f1",
+      name: "Amul Taaza Milk",
+      category: "Dairy",
+      store: "FreshMart Central",
+      distance: "1.2 km",
+      status: "Expiring soon",
+      quantityAvailable: "26 packets",
+      pickupDeadline: "Today, 6:00 PM",
+      price: 18,
+      originalPrice: 28,
+      unit: "packet"
+    },
+    {
+      id: "f2",
+      name: "Fresh Paneer",
+      category: "Dairy",
+      store: "FreshMart West",
+      distance: "2.4 km",
+      status: "Available",
+      quantityAvailable: "14 packs",
+      pickupDeadline: "Today, 9:00 PM",
+      price: 72,
+      originalPrice: 110,
+      unit: "pack"
+    },
+    {
+      id: "f3",
+      name: "Amul Masti Curd",
+      category: "Dairy",
+      store: "FreshMart Central",
+      distance: "2.8 km",
+      status: "Reserved",
+      quantityAvailable: "20 cups",
+      pickupDeadline: "Today, 7:00 PM",
+      price: 24,
+      originalPrice: 36,
+      unit: "cups"
+    },
+    {
+      id: "f4",
+      name: "Tomato",
+      category: "Vegetables",
+      store: "FreshMart East",
+      distance: "3.6 km",
+      status: "Available",
+      quantityAvailable: "30 kg",
+      pickupDeadline: "Tomorrow, 2:00 PM",
+      price: 22,
+      originalPrice: 35,
+      unit: "kg"
+    },
+    {
+      id: "f5",
+      name: "Potato",
+      category: "Vegetables",
+      store: "FreshMart North",
+      distance: "4.1 km",
+      status: "Available",
+      quantityAvailable: "47 kg",
+      pickupDeadline: "Tomorrow, 5:00 PM",
+      price: 18,
+      originalPrice: 28,
+      unit: "kg"
+    },
+    {
+      id: "f6",
+      name: "Bhindi",
+      category: "Vegetables",
+      store: "FreshMart City Lines",
+      distance: "1.8 km",
+      status: "Expiring soon",
+      quantityAvailable: "13 kg",
+      pickupDeadline: "Today, 7:00 PM",
+      price: 28,
+      originalPrice: 45,
+      unit: "kg"
+    },
+  ];
+
+  // Merge live items
+  const liveFood = listings.map(l => ({
+    id: l.id,
+    name: l.productName,
+    category: l.category || "Produce",
+    store: l.storeName || "FreshMart Store",
+    distance: "1.5 km",
+    status: l.discountPercent > 20 ? "Expiring soon" : "Available",
+    quantityAvailable: `${l.quantityAvailable} ${l.unit}`,
+    pickupDeadline: "Today, 8:00 PM",
+    price: l.currentPrice,
+    originalPrice: l.originalPrice,
+    unit: l.unit
+  }));
+
+  const allFood = [...foodCards, ...liveFood];
+
+  const filtered = allFood.filter(item => {
+    const matchCategory = selectedCategory === "All" || item.category.toLowerCase() === selectedCategory.toLowerCase();
+    const matchQuery = item.name.toLowerCase().includes(query.toLowerCase()) || item.store.toLowerCase().includes(query.toLowerCase());
+    return matchCategory && matchQuery;
+  });
+
+  const updateQty = (id: string, delta: number) => {
+    setQuantities(prev => ({
+      ...prev,
+      [id]: Math.max(0, (prev[id] || 0) + delta)
+    }));
+  };
+
+  const handleBuy = (item: typeof allFood[0]) => {
+    const qty = (quantities[item.id] && quantities[item.id] > 0) ? quantities[item.id] : 1;
+    setReserveQty(qty);
+    setReserveModalItem(item);
+    setIssuedOrder(null);
+  };
+
+  const handleConfirmReservation = async () => {
+    if (!reserveModalItem) return;
+    setReserving(true);
+    try {
+      if (reserveModalItem.id.startsWith("f")) {
+        // Mock order pass creation for seeded UI items
+        const randomCode = "SS-" + Math.floor(1000 + Math.random() * 9000);
+        const newOrder = {
+          id: "ord-" + Date.now(),
+          listingId: reserveModalItem.id,
+          productName: reserveModalItem.name,
+          quantity: reserveQty,
+          priceAtOrder: reserveModalItem.price * reserveQty,
+          status: "RESERVED",
+          reservedAt: new Date().toISOString(),
+          qrCode: randomCode,
+          userId: "demo-cust-1"
+        } as unknown as Order;
+        setIssuedOrder(newOrder);
+      } else {
+        const order = await reserveListing(reserveModalItem.id, reserveQty);
+        setIssuedOrder(order);
+      }
+      onAction(`Reserved ${reserveQty} ${reserveModalItem.unit} of ${reserveModalItem.name}!`, "success");
+    } catch (err: any) {
+      onAction(err?.message || "Reservation failed.", "error");
+    } finally {
+      setReserving(false);
+    }
+  };
+
+  return (
+    <div className="ss-reveal max-w-6xl mx-auto space-y-6">
+      {/* Top Header matching Screenshot 2 */}
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-[#00897B]">VERIFIED SURPLUS STORES</p>
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] mt-1">Food available nearby</h1>
+        <p className="text-sm text-[#78726B] mt-1">Discounted food from stores near you. Select a quantity and collect it on time.</p>
+      </div>
+
+      {/* Filter and Categories Bar matching Screenshot 2 */}
+      <div className="flex flex-col sm:flex-row items-center gap-3">
+        <div className="relative flex-1 w-full">
+          <Search className="absolute left-3.5 top-3.5 h-4 w-4 text-[#8A847E] pointer-events-none" />
+          <input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search food or store"
+            className="ss-input text-sm"
+            style={{ paddingLeft: "2.6rem" }}
+          />
+        </div>
+
+        {/* Category Pills matching Screenshot 2 */}
+        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+          {["All", "Dairy", "Vegetables", "Bakery", "Staples"].map(cat => (
+            <button
+              key={cat}
+              onClick={() => setSelectedCategory(cat)}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 ${selectedCategory === cat ? "bg-[#2E3735] text-white shadow-sm" : "bg-white text-[#554F4A] border border-[#EAE6DF] hover:bg-[#F8F6F1]"}`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 3-Column Food Grid matching Screenshot 2 */}
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {filtered.map(item => (
+          <div key={item.id} className="ss-card p-5 bg-white space-y-3.5 flex flex-col justify-between">
+            <div>
+              {/* Card Header */}
+              <div className="flex items-start justify-between">
+                <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#F5F5F3] text-[#7A746E]">
+                  <Boxes className="h-5 w-5" />
+                </div>
+                <StatusBadge label={item.status} />
+              </div>
+
+              {/* Title & Store */}
+              <div className="mt-3">
+                <h3 className="font-bold text-base text-[#2E221F]">{item.name}</h3>
+                <p className="text-xs text-[#7A746E] mt-0.5">{item.store} • {item.distance}</p>
+              </div>
+
+              {/* Two info boxes matching Screenshot 2 */}
+              <div className="grid grid-cols-2 gap-2 mt-4">
+                <div className="rounded-xl bg-[#F6F6F4] p-2.5">
+                  <p className="text-[11px] text-[#8A847E]">Quantity available</p>
+                  <p className="font-bold text-xs text-[#2E221F] mt-0.5">{item.quantityAvailable}</p>
+                </div>
+                <div className="rounded-xl bg-[#F6F6F4] p-2.5">
+                  <p className="text-[11px] text-[#8A847E]">Pickup deadline</p>
+                  <p className="font-bold text-xs text-[#2E221F] mt-0.5">{item.pickupDeadline}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Row: Price, Stepper, and Buy Button */}
+            <div className="pt-2 flex items-center justify-between gap-2 border-t border-[#EAE6DF]/60">
+              <div>
+                <span className="text-lg font-extrabold text-[#FF6548]">₹{item.price}</span>
+                <span className="text-xs text-[#8A847E] line-through ml-1">₹{item.originalPrice}</span>
+                <span className="text-[11px] text-[#8A847E] block">/ {item.unit}</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {/* Stepper [ - ] [ 0 ] [ + ] */}
+                <div className="flex items-center border border-[#EAE6DF] rounded-lg bg-white overflow-hidden">
+                  <button
+                    onClick={() => updateQty(item.id, -1)}
+                    className="px-2 py-1 text-xs text-[#7A746E] hover:bg-[#F5F5F3]"
+                  >
+                    <Minus className="h-3 w-3" />
+                  </button>
+                  <span className="px-2 py-1 text-xs font-bold text-[#2E221F] min-w-[20px] text-center">
+                    {quantities[item.id] || 0}
+                  </span>
+                  <button
+                    onClick={() => updateQty(item.id, 1)}
+                    className="px-2 py-1 text-xs text-[#7A746E] hover:bg-[#F5F5F3]"
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => handleBuy(item)}
+                  className="ss-btn-coral px-4 py-2 text-xs font-semibold shadow-sm"
+                >
+                  Buy
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Reservation & Instant QR Code Modal */}
+      {reserveModalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="ss-card w-full max-w-md p-6 bg-white ss-reveal">
+            <div className="flex items-center justify-between pb-3 border-b border-[#EAE6DF]">
+              <h3 className="font-bold text-lg text-[#2E221F]">Reserve {reserveModalItem.name}</h3>
+              <button onClick={() => setReserveModalItem(null)}><X className="h-4 w-4 text-[#8A847E]" /></button>
+            </div>
+
+            {issuedOrder ? (
+              <div className="py-4 text-center space-y-3 ss-reveal">
+                <CheckCircle2 className="mx-auto h-10 w-10 text-[#00897B]" />
+                <h4 className="text-lg font-bold text-[#2E221F]">Pickup Pass Ready!</h4>
+                <p className="text-xs text-[#7A746E]">
+                  Show this QR code or Pass ID at <strong>{reserveModalItem.store}</strong> to collect:
+                </p>
+
+                <div className="my-3 flex justify-center p-3 bg-white rounded-xl border border-[#EAE6DF] shadow-sm w-fit mx-auto">
+                  <QRCodeSVG value={issuedOrder.qrCode || issuedOrder.id} size={160} level="M" />
+                </div>
+
+                <div className="p-2.5 bg-[#FDF2EF] rounded-lg font-mono text-2xl font-bold tracking-widest text-[#FF6548]">
+                  {issuedOrder.qrCode || issuedOrder.id.slice(-6).toUpperCase()}
+                </div>
+
+                <p className="text-xs text-[#7A746E]">
+                  Hold reserved for 15 minutes • Pay ₹{(reserveModalItem.price * reserveQty).toFixed(2)} at counter
+                </p>
+
+                <div className="flex gap-2 pt-2">
+                  <Link href="/ngo/active" className="ss-btn-coral flex-1 py-2.5 text-xs text-center font-semibold">
+                    View in Active Passes
+                  </Link>
+                  <button onClick={() => setReserveModalItem(null)} className="ss-btn-soft px-4 py-2.5 text-xs font-semibold">
+                    Close
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[#2D2320]">Quantity to Reserve ({reserveModalItem.unit})</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={reserveQty}
+                    onChange={e => setReserveQty(Math.max(1, Number(e.target.value)))}
+                    className="ss-input mt-1 text-sm"
+                  />
+                </div>
+
+                <div className="rounded-xl bg-[#FAF8F5] border border-[#EAE6DF] p-3 text-xs space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-[#7A746E]">Price per unit:</span>
+                    <strong className="text-[#2D2320]">₹{reserveModalItem.price.toFixed(2)} / {reserveModalItem.unit}</strong>
+                  </div>
+                  <div className="flex justify-between text-sm font-bold text-[#2E221F] pt-1 border-t border-[#EAE6DF]">
+                    <span>Total Amount to Pay:</span>
+                    <span className="text-[#FF6548]">₹{(reserveModalItem.price * reserveQty).toFixed(2)}</span>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex gap-2">
+                  <button onClick={handleConfirmReservation} disabled={reserving} className="ss-btn-coral flex-1 py-2.5 text-xs font-semibold">
+                    {reserving ? "Generating Pass..." : "Confirm & Generate QR Pass"}
+                  </button>
+                  <button onClick={() => setReserveModalItem(null)} className="ss-btn-soft px-4 py-2.5 text-xs font-semibold">
+                    Cancel
+                  </button>
                 </div>
               </div>
             )}
@@ -1302,7 +2144,6 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
 // -------------------------------------------------------------
 function NgoActivePasses() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [selectedPass, setSelectedPass] = useState<Order | null>(null);
 
   useEffect(() => {
     getMyOrders().then(res => {
@@ -1311,50 +2152,50 @@ function NgoActivePasses() {
   }, []);
 
   return (
-    <div className="ss-reveal">
-      <PageIntro
-        eyebrow="Counter Pickup Passes"
-        title="Active QR Pickup Passes"
-        copy="Show the QR code or Pass ID on your screen when you arrive at the supermarket counter. The cashier will scan it to verify and complete your purchase."
-      />
+    <div className="ss-reveal max-w-4xl mx-auto space-y-6">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-[#00897B]">COUNTER PICKUP PASSES</p>
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] mt-1">Active QR Pickup Passes</h1>
+        <p className="text-sm text-[#78726B] mt-1">Show this QR code or Pass ID at the supermarket checkout counter to complete your purchase.</p>
+      </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-5 md:grid-cols-2">
         {orders.map(order => {
           const passId = order.qrCode || order.id.slice(-6).toUpperCase();
           return (
-            <div key={order.id} className="ss-card p-6 bg-white flex flex-col justify-between">
+            <div key={order.id} className="ss-card p-6 bg-white flex flex-col justify-between space-y-4">
               <div>
                 <div className="flex items-start justify-between">
                   <div>
-                    <span className="ss-kicker text-[10px]">Active Reservation</span>
-                    <h3 className="font-bold text-xl text-[hsl(var(--primary))] mt-1">{order.productName || "Produce Lot"}</h3>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#00897B]">Active Reservation</span>
+                    <h3 className="font-bold text-lg text-[#2E221F] mt-0.5">{order.productName || "Produce Lot"}</h3>
                   </div>
-                  <StatusChip label="Reserved" />
+                  <span className="ss-chip badge-reserved">Reserved</span>
                 </div>
 
-                <div className="mt-5 flex items-center justify-center p-4 bg-[#FAF9F5] rounded-xl border border-stone-200">
+                <div className="mt-4 flex items-center justify-center p-4 bg-[#FAF9F6] rounded-xl border border-[#EAE6DF]">
                   <QRCodeSVG value={order.qrCode || order.id} size={150} level="M" />
                 </div>
 
                 <div className="mt-4 text-center">
-                  <p className="text-xs text-[hsl(var(--muted-foreground))]">Pass Code</p>
-                  <p className="font-mono text-2xl font-bold tracking-widest text-[#C2671A] mt-0.5">{passId}</p>
+                  <p className="text-xs text-[#7A746E]">Pass Code</p>
+                  <p className="font-mono text-2xl font-bold tracking-widest text-[#FF6548] mt-0.5">{passId}</p>
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-[hsl(var(--border))] grid grid-cols-2 gap-2 text-xs">
+                <div className="mt-4 pt-3 border-t border-[#EAE6DF] grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <span className="text-[hsl(var(--muted-foreground))]">Quantity</span>
-                    <p className="font-bold mt-0.5">{order.quantity} units</p>
+                    <span className="text-[#7A746E]">Quantity</span>
+                    <p className="font-bold text-[#2E221F] mt-0.5">{order.quantity} units</p>
                   </div>
                   <div>
-                    <span className="text-[hsl(var(--muted-foreground))]">Total to Pay</span>
-                    <p className="font-bold text-[hsl(var(--accent))] mt-0.5">₹{order.priceAtOrder ? order.priceAtOrder.toFixed(2) : "—"}</p>
+                    <span className="text-[#7A746E]">Total to Pay</span>
+                    <p className="font-bold text-[#FF6548] mt-0.5">₹{order.priceAtOrder ? order.priceAtOrder.toFixed(2) : "—"}</p>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-5 pt-3 border-t border-[hsl(var(--border))] text-center">
-                <p className="text-[11px] text-[hsl(var(--muted-foreground))]">Present this code at store counter to fulfill order.</p>
+              <div className="pt-2 border-t border-[#EAE6DF] text-center">
+                <p className="text-[11px] text-[#7A746E]">Present this code at store counter to fulfill order.</p>
               </div>
             </div>
           );
@@ -1362,13 +2203,13 @@ function NgoActivePasses() {
 
         {orders.length === 0 && (
           <div className="col-span-2 ss-card py-16 text-center">
-            <QrCode className="mx-auto h-12 w-12 text-stone-300" />
-            <h3 className="mt-4 font-bold text-lg text-[hsl(var(--primary))]">No Active Reservations</h3>
-            <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))] max-w-sm mx-auto">
+            <QrCode className="mx-auto h-12 w-12 text-[#B0A9A0]" />
+            <h3 className="mt-4 font-bold text-lg text-[#2E221F]">No Active Reservations</h3>
+            <p className="mt-1 text-xs text-[#7A746E] max-w-sm mx-auto">
               You don't have any active pickup passes right now. Browse available food to reserve items and get your QR pass!
             </p>
-            <Link href="/ngo/available-food" className="ss-btn-primary inline-flex items-center gap-2 mt-5 px-5 py-2.5 text-xs">
-              Browse Available Produce <ArrowRight className="h-4 w-4" />
+            <Link href="/ngo/available-food" className="ss-btn-coral inline-flex items-center gap-2 mt-5 px-5 py-2.5 text-xs font-semibold">
+              Browse Available Food <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
         )}
@@ -1378,65 +2219,64 @@ function NgoActivePasses() {
 }
 
 // -------------------------------------------------------------
-// CUSTOMER & NGO WORKSPACE: ORDER HISTORY
+// CUSTOMER & NGO WORKSPACE: ORDER HISTORY (My Orders)
 // -------------------------------------------------------------
 function NgoHistory() {
   const [historyOrders, setHistoryOrders] = useState<Order[]>([]);
 
   useEffect(() => {
     getMyOrders().then(res => {
-      // Sort newest first
       const sorted = [...res].sort((a, b) => new Date(b.reservedAt).getTime() - new Date(a.reservedAt).getTime());
       setHistoryOrders(sorted);
     }).catch(() => []);
   }, []);
 
   return (
-    <div className="ss-reveal">
-      <PageIntro
-        eyebrow="Receipts & Records"
-        title="Order History"
-        copy="A chronological history of all your past reservations, fulfilled collections, and saved produce. Newest bookings appear on top."
-      />
+    <div className="ss-reveal max-w-5xl mx-auto space-y-6">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-[#00897B]">RECEIPTS & RECORDS</p>
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] mt-1">My Orders</h1>
+        <p className="text-sm text-[#78726B] mt-1">A chronological history of all your past reservations and fulfilled collections.</p>
+      </div>
 
       <div className="ss-card overflow-hidden">
         <div className="ss-table-wrap">
           <table className="ss-table w-full text-sm">
             <thead>
               <tr>
-                <th>Pass ID</th>
-                <th>Produce Item</th>
-                <th>Quantity</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th>Date & Time</th>
+                <th>PASS ID</th>
+                <th>PRODUCE ITEM</th>
+                <th>QUANTITY</th>
+                <th>AMOUNT</th>
+                <th>STATUS</th>
+                <th>DATE & TIME</th>
               </tr>
             </thead>
             <tbody>
               {historyOrders.map(order => (
-                <tr key={order.id} className="hover:bg-stone-50">
+                <tr key={order.id} className="hover:bg-[#FAF8F5]">
                   <td>
-                    <span className="font-mono text-xs font-bold bg-stone-100 px-2 py-1 rounded border border-stone-200">
+                    <span className="font-mono text-xs font-bold bg-[#F5F5F3] px-2 py-1 rounded border border-[#EAE6DF]">
                       {order.qrCode || order.id.slice(-6).toUpperCase()}
                     </span>
                   </td>
                   <td>
-                    <p className="font-semibold">{order.productName || "Produce Lot"}</p>
-                    <p className="text-[10px] text-[hsl(var(--muted-foreground))]">Order ID: {order.id.slice(-6)}</p>
+                    <p className="font-bold text-[#2E221F]">{order.productName || "Produce Lot"}</p>
+                    <p className="text-[11px] text-[#8A847E]">Order: {order.id.slice(-6)}</p>
                   </td>
-                  <td>{order.quantity} units</td>
-                  <td className="font-semibold">₹{order.priceAtOrder ? order.priceAtOrder.toFixed(2) : "—"}</td>
+                  <td className="font-semibold text-[#2E221F]">{order.quantity} units</td>
+                  <td className="font-semibold text-[#2E221F]">₹{order.priceAtOrder ? order.priceAtOrder.toFixed(2) : "—"}</td>
                   <td>
-                    <StatusChip label={order.status === "FULFILLED" ? "Collected" : order.status} />
+                    <StatusBadge label={order.status === "FULFILLED" ? "Confirmed" : order.status} />
                   </td>
-                  <td className="text-xs text-[hsl(var(--muted-foreground))]">
+                  <td className="text-xs text-[#7A746E]">
                     {new Date(order.reservedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </td>
                 </tr>
               ))}
               {historyOrders.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-xs text-[hsl(var(--muted-foreground))]">
+                  <td colSpan={6} className="py-12 text-center text-xs text-[#7A746E]">
                     No order history yet.
                   </td>
                 </tr>
@@ -1460,20 +2300,25 @@ function NotificationsPage() {
   }, []);
 
   return (
-    <div className="ss-reveal">
-      <PageIntro eyebrow="Activity" title="Notifications & Flash Deals" copy="Real-time notifications for discount tier changes, price drops, and order status." />
+    <div className="ss-reveal max-w-4xl mx-auto space-y-6">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-[#00897B]">UPDATES & ALERTS</p>
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] mt-1">Notifications</h1>
+        <p className="text-sm text-[#78726B] mt-1">Real-time alerts for discount tier adjustments, orders, and pickups.</p>
+      </div>
+
       <div className="ss-card p-4 space-y-3">
         {notifs.map(n => (
-          <div key={n.id} className="p-4 rounded-xl border border-[hsl(var(--border))] flex items-start gap-3">
-            <Bell className="h-5 w-5 text-[hsl(var(--accent))] mt-0.5" />
+          <div key={n.id} className="p-4 rounded-xl border border-[#EAE6DF] flex items-start gap-3 bg-white">
+            <Bell className="h-5 w-5 text-[#FF6548] mt-0.5 shrink-0" />
             <div className="flex-1">
-              <p className="text-sm font-semibold">{n.message}</p>
-              <p className="text-[11px] text-[hsl(var(--muted-foreground))] mt-1">{new Date(n.createdAt).toLocaleString()}</p>
+              <p className="text-sm font-semibold text-[#2E221F]">{n.message}</p>
+              <p className="text-[11px] text-[#8A847E] mt-1">{new Date(n.createdAt).toLocaleString()}</p>
             </div>
           </div>
         ))}
         {notifs.length === 0 && (
-          <div className="py-12 text-center text-xs text-[hsl(var(--muted-foreground))]">No notifications right now.</div>
+          <div className="py-12 text-center text-xs text-[#7A746E]">No notifications right now.</div>
         )}
       </div>
     </div>
@@ -1495,7 +2340,6 @@ function ProductRoute() {
   const type = location.split("/").filter(Boolean).slice(1).join("/") || "overview";
 
   const renderPage = () => {
-    // Supermarket routes
     if (role === "supermarket") {
       if (type === "overview") return <DashboardHome onAction={notify} />;
       if (type === "inventory") return <InventoryPage onAction={notify} />;
@@ -1507,25 +2351,26 @@ function ProductRoute() {
       return <DashboardHome onAction={notify} />;
     }
 
-    // Customer & NGO routes: Browse Food, Active Passes, Order History, Notifications
     if (role === "ngo") {
-      if (type === "available-food" || type === "overview") return <NgoAvailableFood onAction={notify} />;
-      if (type === "active" || type === "requests") return <NgoActivePasses />;
-      if (type === "history" || type === "pickups") return <NgoHistory />;
+      if (type === "overview") return <NgoOverview onAction={notify} />;
+      if (type === "available-food" || type === "browse") return <NgoAvailableFood onAction={notify} />;
+      if (type === "history" || type === "my-orders") return <NgoHistory />;
+      if (type === "active" || type === "my-pickups") return <NgoActivePasses />;
+      if (type === "impact") return <ImpactPage />;
       if (type === "notifications") return <NotificationsPage />;
-      return <NgoAvailableFood onAction={notify} />;
+      return <NgoOverview onAction={notify} />;
     }
 
     return <DashboardHome onAction={notify} />;
   };
 
   return (
-    <div className="ss-shell ss-noise flex min-h-[100dvh]">
+    <div className="ss-shell flex min-h-[100dvh]">
       <Sidebar role={role} path={location} onNavigate={() => setToast(null)} />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 flex flex-col">
         <MobileNav role={role} path={location} onNavigate={() => setToast(null)} />
-        <Topbar role={role} path={location} onAction={notify} />
-        <main className="mx-auto max-w-[1440px] px-5 py-7 lg:px-8 lg:py-9">
+        <Topbar role={role} path={location} />
+        <main className="flex-1 px-6 py-8 lg:px-10">
           {renderPage()}
         </main>
       </div>
@@ -1538,9 +2383,10 @@ function NotFound() {
   return (
     <div className="ss-shell grid min-h-[100dvh] place-items-center px-5 text-center">
       <div>
-        <p className="ss-kicker">404</p>
-        <h1 className="mt-3 text-4xl font-bold text-[hsl(var(--primary))]">Page not found</h1>
-        <Link href="/" className="ss-btn-primary mt-6 inline-flex px-4 py-2.5 text-xs">Back to Home</Link>
+        <h1 className="text-4xl font-extrabold text-[#2E221F]">Page not found</h1>
+        <Link href="/" className="ss-btn-coral mt-6 inline-flex px-4 py-2.5 text-xs font-semibold">
+          Back to Home
+        </Link>
       </div>
     </div>
   );
@@ -1548,17 +2394,19 @@ function NotFound() {
 
 export default function App() {
   return (
-    <TooltipProvider>
-      <ErrorBoundary>
-        <Switch>
-          <Route path="/" component={Landing} />
-          <Route path="/login" component={Login} />
-          <Route path="/supermarket/:rest*" component={ProductRoute} />
-          <Route path="/ngo/:rest*" component={ProductRoute} />
-          <Route component={NotFound} />
-        </Switch>
-      </ErrorBoundary>
-      <Toaster />
-    </TooltipProvider>
+    <ThemeProvider>
+      <TooltipProvider>
+        <ErrorBoundary>
+          <Switch>
+            <Route path="/" component={Landing} />
+            <Route path="/login" component={Login} />
+            <Route path="/supermarket/:rest*" component={ProductRoute} />
+            <Route path="/ngo/:rest*" component={ProductRoute} />
+            <Route component={NotFound} />
+          </Switch>
+        </ErrorBoundary>
+        <Toaster />
+      </TooltipProvider>
+    </ThemeProvider>
   );
 }
