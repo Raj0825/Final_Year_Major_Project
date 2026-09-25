@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, User, Bell, Sliders, Shield, Check, RotateCcw, Store, MapPin } from "lucide-react";
+import { X, User, Bell, Sliders, Shield, Check, RotateCcw, Store, MapPin, Navigation, Loader2, ExternalLink } from "lucide-react";
 import { loadSettings, saveSettings, UserSettings, upsertStore, clearAllData } from "@/data/mockStore";
 
 interface SettingsModalProps {
@@ -39,6 +39,59 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
       clearAllData();
       window.location.reload();
     }
+  };
+
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsMsg, setGpsMsg] = useState<string | null>(null);
+
+  const handleDetectGPS = () => {
+    setGpsLoading(true);
+    setGpsMsg(null);
+    if (!navigator.geolocation) {
+      setGpsMsg("❌ Geolocation not supported by your browser.");
+      setGpsLoading(false);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&addressdetails=1`,
+            { headers: { "Accept-Language": "en" } }
+          );
+          const data = await res.json();
+          const addr = data.address || {};
+          const parts = [
+            addr.road || addr.pedestrian,
+            addr.neighbourhood || addr.suburb || addr.city_district,
+            addr.city || addr.town || addr.county
+          ].filter(Boolean);
+          const detectedAddress = parts.slice(0, 3).join(", ") || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+          const detectedArea = addr.neighbourhood || addr.suburb || addr.city_district || addr.city || "Local Area";
+          setSettings(s => ({
+            ...s,
+            userLocation: detectedAddress,
+            selectedArea: detectedArea,
+            gpsLat: latitude,
+            gpsLng: longitude,
+            storeLocation: s.role === "supermarket" ? (s.storeLocation || detectedAddress) : s.storeLocation
+          }));
+          setGpsMsg(`✅ Location detected: ${detectedAddress}`);
+        } catch {
+          setSettings(s => ({ ...s, gpsLat: latitude, gpsLng: longitude }));
+          setGpsMsg(`✅ GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+        } finally {
+          setGpsLoading(false);
+        }
+      },
+      (err) => {
+        setGpsLoading(false);
+        if (err.code === 1) setGpsMsg("❌ Location access denied. Allow location in browser settings.");
+        else setGpsMsg("❌ Could not get location. Enter manually.");
+      },
+      { enableHighAccuracy: true, timeout: 12000 }
+    );
   };
 
   return (
@@ -158,6 +211,29 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
                     />
                   </div>
 
+                  {/* GPS for Store Location */}
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      type="button"
+                      onClick={handleDetectGPS}
+                      disabled={gpsLoading}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#E0F7F2] dark:bg-[#18332B] text-[#00897B] dark:text-[#2DD4BF] font-semibold text-xs border border-[#B2EBE0] dark:border-[#1E4A3A] hover:bg-[#C8F0E8] transition-all cursor-pointer"
+                    >
+                      {gpsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Navigation className="h-3.5 w-3.5" />}
+                      {gpsLoading ? "Detecting..." : "📍 Detect store location"}
+                    </button>
+                    {settings.storeLocation && (
+                      <button type="button" onClick={() => window.open(`https://www.google.com/maps/search/${encodeURIComponent(settings.storeLocation)}`, "_blank")} title="Open in Google Maps" className="px-3 py-2 rounded-xl border border-[#EAE6DF] dark:border-[#2D3835] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5] cursor-pointer">
+                        <ExternalLink className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  {gpsMsg && (
+                    <div className={`p-2.5 rounded-lg border text-xs font-medium ${
+                      gpsMsg.startsWith("✅") ? "bg-green-50 border-green-200 text-green-700" : "bg-amber-50 border-amber-200 text-amber-700"
+                    }`}>{gpsMsg}</div>
+                  )}
+
                   <div>
                     <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">
                       Neighborhood / City Area
@@ -187,6 +263,33 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
                 </>
               ) : (
                 <>
+                  {/* GPS Detect */}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleDetectGPS}
+                      disabled={gpsLoading}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#E0F7F2] dark:bg-[#18332B] text-[#00897B] dark:text-[#2DD4BF] font-semibold text-xs border border-[#B2EBE0] dark:border-[#1E4A3A] hover:bg-[#C8F0E8] transition-all cursor-pointer"
+                    >
+                      {gpsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Navigation className="h-3.5 w-3.5" />}
+                      {gpsLoading ? "Detecting..." : "📍 Auto-detect my location"}
+                    </button>
+                    {(settings.gpsLat || settings.userLocation) && (
+                      <button
+                        type="button"
+                        onClick={() => window.open(`https://www.google.com/maps/search/${encodeURIComponent(settings.userLocation || "")}`, "_blank")}
+                        title="Open in Google Maps"
+                        className="px-3 py-2 rounded-xl border border-[#EAE6DF] dark:border-[#2D3835] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D] transition-all cursor-pointer"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  {gpsMsg && (
+                    <div className={`p-2.5 rounded-lg border text-xs font-medium ${
+                      gpsMsg.startsWith("✅") ? "bg-green-50 border-green-200 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400" : "bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-400"
+                    }`}>{gpsMsg}</div>
+                  )}
                   <div>
                     <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">
                       Your Address / Location

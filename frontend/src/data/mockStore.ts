@@ -24,6 +24,7 @@ export interface InventoryItem {
   discountPercent: number;
   status: "Available" | "Expiring soon" | "Reserved";
   expiry: string;
+  expiryDate?: string;       // ISO date string yyyy-mm-dd
   expiryHoursLeft: number;
   pickupDeadline: string;
   flagged: boolean;
@@ -81,6 +82,9 @@ export interface UserSettings {
   emailAlerts: boolean;
   smsAlerts: boolean;
   soundEnabled: boolean;
+  gpsLat?: number;      // Last GPS latitude from browser geolocation
+  gpsLng?: number;      // Last GPS longitude from browser geolocation
+  favoriteStores?: string[];  // Array of store names marked as favorite
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {

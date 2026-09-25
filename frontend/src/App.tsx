@@ -654,13 +654,22 @@ function MobileNav({ role, path, onNavigate, onOpenSettings }: { role: AppWorksp
 }
 
 function Topbar({ role, path, onOpenLocation }: { role: AppWorkspaceRole; path: string; onOpenLocation?: () => void }) {
+  const [, setLocation] = useLocation();
   const [settings, setSettings] = useState<UserSettings>(loadSettings);
+  const [notifications, setNotifications] = useState(loadNotifications);
 
   useEffect(() => {
     const handleSettings = () => setSettings(loadSettings());
+    const handleNotifs = () => setNotifications(loadNotifications());
     window.addEventListener("ss_settings_updated", handleSettings);
-    return () => window.removeEventListener("ss_settings_updated", handleSettings);
+    window.addEventListener("ss_notifs_updated", handleNotifs);
+    return () => {
+      window.removeEventListener("ss_settings_updated", handleSettings);
+      window.removeEventListener("ss_notifs_updated", handleNotifs);
+    };
   }, []);
+
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   const locationBreadcrumb = role === "supermarket"
     ? (settings.storeLocation || settings.storeName || "Store Location")
@@ -668,6 +677,7 @@ function Topbar({ role, path, onOpenLocation }: { role: AppWorkspaceRole; path: 
   const workspaceTitle = role === "supermarket" ? (settings.storeName || "Manager workspace") : "Recipient workspace";
   const displayName = role === "supermarket" ? (settings.name || "Store Manager") : (settings.name || "Customer");
   const initials = displayName.split(" ").filter(Boolean).map(n => n[0]).join("").substring(0, 2).toUpperCase() || (role === "supermarket" ? "SM" : "CU");
+  const notifsPath = role === "supermarket" ? "/supermarket/notifications" : "/ngo/notifications";
 
   return (
     <header className="flex items-center justify-between bg-[#FAF7F2] dark:bg-[#1A2220] px-6 py-4 lg:px-8 border-b border-[#EAE6DF]/60 dark:border-[#2D3835]">
@@ -683,8 +693,21 @@ function Topbar({ role, path, onOpenLocation }: { role: AppWorkspaceRole; path: 
         <span className="text-[#554F4A] dark:text-[#CBD5E1] font-medium">{workspaceTitle}</span>
       </button>
 
-      {/* User profile avatar on right + Theme Toggle */}
+      {/* Right side: Notifications + Theme + Avatar */}
       <div className="flex items-center gap-3">
+        {/* Notification Bell with Badge */}
+        <button
+          onClick={() => setLocation(notifsPath)}
+          className="relative p-2 rounded-xl text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#EAE6DF] dark:hover:bg-[#2A3532] hover:text-[#2D2320] dark:hover:text-[#F0F4F2] transition-all cursor-pointer"
+          title="Notifications"
+        >
+          <Bell className="h-5 w-5" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#FF6548] text-[9px] font-bold text-white shadow-sm">
+              {unreadCount > 9 ? "9+" : unreadCount}
+            </span>
+          )}
+        </button>
         <ThemeToggle />
         <div className="flex items-center gap-2.5">
           <div className="grid h-8 w-8 place-items-center rounded-full bg-[#FCE5DF] dark:bg-[#3D2520] text-xs font-bold text-[#E0533C] dark:text-[#FF8D75]">
@@ -696,6 +719,7 @@ function Topbar({ role, path, onOpenLocation }: { role: AppWorkspaceRole; path: 
     </header>
   );
 }
+
 
 // -------------------------------------------------------------
 // SUPERMARKET WORKSPACE: OVERVIEW
@@ -1066,6 +1090,11 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
   const [newQty, setNewQty] = useState(30);
   const [newUnit, setNewUnit] = useState("kg");
   const [newPrice, setNewPrice] = useState(50);
+  const [newDiscountPct, setNewDiscountPct] = useState(0);
+  const [newExpiryDate, setNewExpiryDate] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() + 2);
+    return d.toISOString().split("T")[0];
+  });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -1084,7 +1113,23 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
       const currentStoreArea = settings.storeArea?.trim() || "Central Market";
       const storeInitials = currentStoreName.substring(0, 2).toUpperCase() || "SM";
 
-      // Create locally and sync
+      // Calculate expiry hours from selected date
+      const expiryMs = new Date(newExpiryDate).getTime() - Date.now();
+      const expiryHoursLeft = Math.max(0, Math.floor(expiryMs / 3600000));
+      const expiryDays = Math.ceil(expiryHoursLeft / 24);
+      const expiryLabel = expiryHoursLeft <= 6 ? `${expiryHoursLeft}h left` :
+        expiryHoursLeft <= 24 ? "Today" :
+        expiryDays === 1 ? "Tomorrow" : `In ${expiryDays} days`;
+
+      const discPct = Math.min(Math.max(0, newDiscountPct), 90);
+      const discountedPrice = discPct > 0
+        ? Math.round(newPrice * (1 - discPct / 100) * 100) / 100
+        : newPrice;
+
+      const freshnessScore = expiryHoursLeft > 48 ? 0.95 :
+        expiryHoursLeft > 24 ? 0.75 :
+        expiryHoursLeft > 6 ? 0.55 : 0.3;
+
       const newItem: InventoryItem = {
         id: "inv-" + Date.now(),
         name: newProduct,
@@ -1093,23 +1138,23 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
         available: newQty,
         unit: newUnit,
         originalPrice: newPrice,
-        currentPrice: newPrice,
-        discountPercent: 0,
-        status: "Available",
-        expiry: "In 2 days",
-        expiryHoursLeft: 48,
-        pickupDeadline: "Tomorrow, 6:00 PM",
-        flagged: false,
+        currentPrice: discountedPrice,
+        discountPercent: discPct,
+        status: expiryHoursLeft <= 24 ? "Expiring soon" : "Available",
+        expiry: expiryLabel,
+        expiryDate: newExpiryDate,
+        expiryHoursLeft,
+        pickupDeadline: new Date(newExpiryDate).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" }) + ", 6:00 PM",
+        flagged: expiryHoursLeft <= 24,
         storeId: settings.storeId || "store-main",
         store: currentStoreName,
         storeLocation: currentStoreLocation,
         storeArea: currentStoreArea,
         distance: "0.8 km",
-        freshnessScore: 0.95,
+        freshnessScore,
         storageTip: "Store in appropriate temperature and humidity controls."
       };
 
-      // Ensure store registry is up to date
       upsertStore({
         id: settings.storeId,
         name: currentStoreName,
@@ -1121,9 +1166,10 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
 
       const updated = [newItem, ...inventory];
       saveInventory(updated);
-      onAction(`Added ${newProduct} to ${currentStoreName} inventory.`);
+      onAction(`Added ${newProduct} (${discPct > 0 ? discPct + "% off, " : ""}expires ${expiryLabel}) to ${currentStoreName}.`);
       setModalOpen(false);
       setNewProduct("");
+      setNewDiscountPct(0);
     } catch (err: any) {
       onAction(err?.message || "Failed to add batch.");
     } finally {
@@ -1491,17 +1537,23 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
 
       {/* Add Produce Lot Modal */}
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 ss-reveal">
-          <div className="ss-card w-full max-w-md p-6 bg-white dark:bg-[#1F2825] shadow-2xl border border-[#EAE6DF] dark:border-[#2D3835]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 ss-reveal" onClick={e => e.target === e.currentTarget && setModalOpen(false)}>
+          <div className="ss-card w-full max-w-lg p-6 bg-white dark:bg-[#1F2825] shadow-2xl border border-[#EAE6DF] dark:border-[#2D3835] max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-[#EAE6DF] dark:border-[#2D3835]">
-              <h3 className="font-bold text-lg text-[#2E221F] dark:text-[#F0F4F2]">Add New Inventory Lot</h3>
-              <button onClick={() => setModalOpen(false)} className="text-[#8A847E]"><X className="h-4 w-4" /></button>
-            </div>
-            <form onSubmit={handleCreate} className="mt-4 space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">Product Name</label>
-                <input value={newProduct} onChange={e => setNewProduct(e.target.value)} required placeholder="e.g. Amul Taaza Milk, Tomato, Bhindi" className="ss-input mt-1" />
+                <h3 className="font-bold text-lg text-[#2E221F] dark:text-[#F0F4F2]">Add New Inventory Lot</h3>
+                <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-0.5">Fill in product details, expiry date and discount to list on customer feed</p>
               </div>
+              <button onClick={() => setModalOpen(false)} className="p-1.5 rounded-lg text-[#8A847E] hover:bg-[#F5F5F3] dark:hover:bg-[#25302D] cursor-pointer"><X className="h-4 w-4" /></button>
+            </div>
+            <form onSubmit={handleCreate} className="mt-4 space-y-4">
+              {/* Product Name */}
+              <div>
+                <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">Product Name *</label>
+                <input value={newProduct} onChange={e => setNewProduct(e.target.value)} required placeholder="e.g. Fresh Tomatoes, Whole Wheat Bread" className="ss-input mt-1" />
+              </div>
+
+              {/* Category & Unit */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">Category</label>
@@ -1516,26 +1568,73 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
                 <div>
                   <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">Unit</label>
                   <select value={newUnit} onChange={e => setNewUnit(e.target.value)} className="ss-input mt-1">
-                    <option>packets</option>
-                    <option>kg</option>
-                    <option>packs</option>
-                    <option>cups</option>
+                    <option value="kg">kg</option>
+                    <option value="packets">packets</option>
+                    <option value="packs">packs</option>
+                    <option value="liters">liters</option>
+                    <option value="units">units</option>
+                    <option value="boxes">boxes</option>
                   </select>
                 </div>
               </div>
+
+              {/* Qty & Price */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">Quantity</label>
+                  <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">Quantity *</label>
                   <input type="number" min="1" value={newQty} onChange={e => setNewQty(Number(e.target.value))} required className="ss-input mt-1" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">Price (₹ / unit)</label>
+                  <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">Original Price (₹/{newUnit}) *</label>
                   <input type="number" step="0.5" min="1" value={newPrice} onChange={e => setNewPrice(Number(e.target.value))} required className="ss-input mt-1" />
                 </div>
               </div>
-              <div className="pt-3 flex gap-2">
+
+              {/* Expiry Date & Discount */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">Expiry Date *</label>
+                  <input
+                    type="date"
+                    value={newExpiryDate}
+                    min={new Date().toISOString().split("T")[0]}
+                    onChange={e => setNewExpiryDate(e.target.value)}
+                    required
+                    className="ss-input mt-1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">Surplus Discount %</label>
+                  <div className="relative mt-1">
+                    <input
+                      type="number"
+                      min="0" max="90" step="5"
+                      value={newDiscountPct}
+                      onChange={e => setNewDiscountPct(Number(e.target.value))}
+                      className="ss-input pr-8"
+                      placeholder="0"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-[#8A847E]">%</span>
+                  </div>
+                  {newDiscountPct > 0 && newPrice > 0 && (
+                    <p className="mt-1 text-[10px] text-[#00897B] font-semibold">
+                      Customer pays ₹{Math.round(newPrice * (1 - newDiscountPct / 100) * 100) / 100}/{newUnit}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Expiry urgency indicator */}
+              {newExpiryDate && (() => {
+                const hrs = Math.floor((new Date(newExpiryDate).getTime() - Date.now()) / 3600000);
+                const color = hrs <= 24 ? "bg-red-50 border-red-200 text-red-700" : hrs <= 48 ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-green-50 border-green-200 text-green-700";
+                const label = hrs <= 6 ? "⚠️ Critical — expires in under 6 hours" : hrs <= 24 ? "⏳ Expiring today — consider adding discount" : hrs <= 48 ? "📅 Expiring tomorrow" : `✅ ${Math.ceil(hrs/24)} days remaining`;
+                return <div className={`p-2.5 rounded-lg border text-xs font-semibold ${color}`}>{label}</div>;
+              })()}
+
+              <div className="pt-2 flex gap-2">
                 <button type="submit" disabled={loading} className="ss-btn-coral flex-1 py-2.5 text-xs font-semibold cursor-pointer">
-                  {loading ? "Adding..." : "Add to Inventory"}
+                  {loading ? "Adding..." : "✓ Add to Inventory"}
                 </button>
                 <button type="button" onClick={() => setModalOpen(false)} className="ss-btn-soft px-4 py-2.5 text-xs cursor-pointer">
                   Cancel
@@ -2927,6 +3026,40 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [detailItem, setDetailItem] = useState<InventoryItem | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<StoreOrder | null>(null);
+  const [favorites, setFavorites] = useState<string[]>(() => settings.favoriteStores || []);
+  const [cart, setCart] = useState<{ item: InventoryItem; qty: number }[]>([]);
+  const [cartOpen, setCartOpen] = useState(false);
+
+  const toggleFavorite = (storeName: string) => {
+    const next = favorites.includes(storeName)
+      ? favorites.filter(f => f !== storeName)
+      : [...favorites, storeName];
+    setFavorites(next);
+    saveSettings({ ...settings, favoriteStores: next });
+    onAction(favorites.includes(storeName) ? `Removed ${storeName} from favorites` : `Added ${storeName} to favorites ❤️`);
+  };
+
+  const addToCart = (item: InventoryItem, qty: number) => {
+    setCart(prev => {
+      const existing = prev.find(c => c.item.id === item.id);
+      if (existing) return prev.map(c => c.item.id === item.id ? { ...c, qty: c.qty + qty } : c);
+      return [...prev, { item, qty }];
+    });
+    onAction(`Added ${qty} ${item.unit} of ${item.name} to cart 🛒`);
+  };
+
+  const checkoutCart = () => {
+    if (cart.length === 0) return;
+    cart.forEach(({ item, qty }) => {
+      const order = addReservation(item, qty, settings.name, settings.userLocation);
+      setSelectedReceipt(order);
+    });
+    setCart([]);
+    setCartOpen(false);
+    onAction(`🎉 All ${cart.length} cart items reserved! Show QR at checkout.`, "success");
+  };
+
+  const cartTotal = cart.reduce((sum, c) => sum + c.item.currentPrice * c.qty, 0);
 
   useEffect(() => {
     const handleUpdate = () => {
@@ -2958,6 +3091,8 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
     setSelectedReceipt(order);
   };
 
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+
   // Build list of distinct supermarkets
   const distinctStoreMap = new Map<string, { name: string; location: string; distance: string }>();
   stores.forEach(s => {
@@ -2981,10 +3116,11 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
   const filtered = inventory.filter(item => {
     const matchCategory = selectedCategory === "All" || item.category.toLowerCase() === selectedCategory.toLowerCase();
     const matchStore = selectedStore === "All" || item.store.toLowerCase() === selectedStore.toLowerCase();
+    const matchFav = !favoritesOnly || favorites.includes(item.store);
     const matchQuery = item.name.toLowerCase().includes(query.toLowerCase()) ||
                        item.store.toLowerCase().includes(query.toLowerCase()) ||
                        (item.storeLocation && item.storeLocation.toLowerCase().includes(query.toLowerCase()));
-    return matchCategory && matchStore && matchQuery;
+    return matchCategory && matchStore && matchFav && matchQuery;
   }).sort((a, b) => {
     if (sortBy === "price_asc") return a.currentPrice - b.currentPrice;
     if (sortBy === "freshness") return b.freshnessScore - a.freshnessScore;
@@ -2995,13 +3131,42 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
 
   return (
     <div className="ss-reveal max-w-6xl mx-auto space-y-6">
-      {/* Top Header */}
-      <div>
-        <p className="text-xs font-bold uppercase tracking-wider text-[#00897B] dark:text-[#2DD4BF]">VERIFIED SURPLUS STORES</p>
-        <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] dark:text-[#F0F4F2] mt-1">Food available nearby</h1>
-        <p className="text-sm text-[#78726B] dark:text-[#A3B2AC] mt-1">
-          Discounted produce from supermarkets near {settings.userLocation || settings.selectedArea}. Choose store & category, select quantities, and generate instant QR passes.
-        </p>
+      {/* Top Header with Cart Button */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-[#00897B] dark:text-[#2DD4BF]">VERIFIED SURPLUS STORES</p>
+          <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] dark:text-[#F0F4F2] mt-1">Food available nearby</h1>
+          <p className="text-sm text-[#78726B] dark:text-[#A3B2AC] mt-1">
+            Discounted produce near {settings.userLocation || settings.selectedArea}. Choose store, build a cart, and generate instant QR pickup passes.
+          </p>
+        </div>
+
+        {/* Cart Quick Button */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setFavoritesOnly(prev => !prev)}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              favoritesOnly
+                ? "bg-rose-500 text-white shadow-sm"
+                : "border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
+            }`}
+            title="Filter by favorited supermarkets"
+          >
+            <Heart className={`h-4 w-4 ${favoritesOnly ? "fill-white text-white" : "text-rose-500"}`} />
+            <span>Favorites {favorites.length > 0 ? `(${favorites.length})` : ""}</span>
+          </button>
+
+          <button
+            onClick={() => setCartOpen(true)}
+            className="relative flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#00897B] hover:bg-[#00796B] text-white text-xs font-bold shadow-sm transition-all cursor-pointer"
+          >
+            <ShoppingCart className="h-4 w-4" />
+            <span>Cart ({cart.reduce((s, c) => s + c.qty, 0)}) • ₹{cartTotal}</span>
+            {cart.length > 0 && (
+              <span className="h-2 w-2 rounded-full bg-amber-400 absolute -top-1 -right-1 animate-ping" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Supermarket Filter Bar */}
@@ -3023,18 +3188,33 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
           {distinctStores.map(s => {
             const isSelected = selectedStore.toLowerCase() === s.name.toLowerCase();
             const count = inventory.filter(i => i.store.toLowerCase() === s.name.toLowerCase()).length;
+            const isFav = favorites.includes(s.name);
             return (
-              <button
+              <div
                 key={s.name}
-                onClick={() => setSelectedStore(s.name)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-all cursor-pointer ${
+                className={`inline-flex items-center rounded-lg text-xs font-semibold shrink-0 border transition-all ${
                   isSelected
-                    ? "bg-[#00897B] text-white shadow-xs"
-                    : "border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
+                    ? "bg-[#00897B] text-white border-[#00897B] shadow-xs"
+                    : "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
                 }`}
               >
-                {s.name} ({count}) • {s.distance}
-              </button>
+                <button
+                  onClick={() => setSelectedStore(s.name)}
+                  className="px-2.5 py-1.5 cursor-pointer text-left"
+                >
+                  {s.name} ({count}) • {s.distance}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFavorite(s.name);
+                  }}
+                  className="pr-2 pl-0.5 py-1.5 text-xs hover:scale-110 transition-transform cursor-pointer"
+                  title={isFav ? "Favorited store" : "Add to favorites"}
+                >
+                  <Heart className={`h-3.5 w-3.5 ${isFav ? "fill-rose-500 text-rose-500" : isSelected ? "text-white/70" : "text-[#A3B2AC]"}`} />
+                </button>
+              </div>
             );
           })}
         </div>
@@ -3091,7 +3271,9 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
             </div>
             <h3 className="font-bold text-base text-[#2E221F] dark:text-[#F0F4F2]">No Surplus Food Available</h3>
             <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-1 max-w-sm mx-auto">
-              {selectedStore !== "All"
+              {favoritesOnly
+                ? "No surplus items found from your favorited supermarkets."
+                : selectedStore !== "All"
                 ? `No items currently listed by ${selectedStore}.`
                 : "No surplus produce listed matching your filters. When nearby supermarkets add food batches, they will appear here live."}
             </p>
@@ -3099,6 +3281,10 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
         ) : (
           filtered.map(item => {
             const itemDist = calculateDistance(settings.userLocation || settings.selectedArea, item.storeLocation || item.store);
+            const isFav = favorites.includes(item.store);
+            const mapsQuery = encodeURIComponent(`${item.store} ${item.storeLocation || ""}`);
+            const qtySelected = quantities[item.id] > 0 ? quantities[item.id] : 1;
+
             return (
               <div key={item.id} className="ss-card p-5 bg-white dark:bg-[#1F2825] space-y-3.5 flex flex-col justify-between hover:shadow-md transition-shadow">
                 <div>
@@ -3119,13 +3305,22 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
                   <div className="mt-3">
                     <div className="flex items-center justify-between">
                       <h3 className="font-bold text-base text-[#2E221F] dark:text-[#F0F4F2]">{item.name}</h3>
-                      <button
-                        onClick={() => setDetailItem(item)}
-                        className="p-1 text-[#7A746E] hover:text-[#00897B] dark:hover:text-[#2DD4BF] cursor-pointer"
-                        title="View Freshness Specs & Tips"
-                      >
-                        <Info className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => toggleFavorite(item.store)}
+                          className="p-1 text-[#7A746E] hover:text-rose-500 cursor-pointer"
+                          title={isFav ? "Favorited store" : "Add store to favorites"}
+                        >
+                          <Heart className={`h-4 w-4 ${isFav ? "fill-rose-500 text-rose-500" : ""}`} />
+                        </button>
+                        <button
+                          onClick={() => setDetailItem(item)}
+                          className="p-1 text-[#7A746E] hover:text-[#00897B] dark:hover:text-[#2DD4BF] cursor-pointer"
+                          title="View Freshness Specs & Tips"
+                        >
+                          <Info className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                     <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-1 flex items-center gap-1.5 flex-wrap">
                       <span className="font-bold text-[#00897B] dark:text-[#2DD4BF]">{item.store}</span>
@@ -3134,32 +3329,50 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
                       <span>•</span>
                       <span className="font-semibold text-[#FF6548]">{itemDist.display}</span>
                     </p>
+                    {/* Google Maps link */}
+                    <div className="mt-1">
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${mapsQuery}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#00897B] dark:text-[#2DD4BF] hover:underline"
+                        title="View supermarket on Google Maps"
+                      >
+                        <Navigation className="h-3 w-3" />
+                        <span>Directions on Maps</span>
+                        <ExternalLink className="h-2.5 w-2.5 opacity-70" />
+                      </a>
+                    </div>
                   </div>
 
                   {/* Two info boxes */}
-                  <div className="grid grid-cols-2 gap-2 mt-4">
+                  <div className="grid grid-cols-2 gap-2 mt-3">
                     <div className="rounded-xl bg-[#F6F6F4] dark:bg-[#25302D] p-2.5">
                       <p className="text-[11px] text-[#8A847E] dark:text-[#64748B]">Quantity available</p>
                       <p className="font-bold text-xs text-[#2E221F] dark:text-[#F0F4F2] mt-0.5">{item.available} {item.unit}</p>
                     </div>
                     <div className="rounded-xl bg-[#F6F6F4] dark:bg-[#25302D] p-2.5">
                       <p className="text-[11px] text-[#8A847E] dark:text-[#64748B]">Pickup deadline</p>
-                      <p className="font-bold text-xs text-[#2E221F] dark:text-[#F0F4F2] mt-0.5">{item.pickupDeadline}</p>
+                      <p className="font-bold text-xs text-[#2E221F] dark:text-[#F0F4F2] mt-0.5 flex items-center gap-1">
+                        <Clock3 className="h-3 w-3 text-amber-500" />
+                        <span>{item.pickupDeadline}</span>
+                      </p>
                     </div>
                   </div>
                 </div>
 
-                {/* Bottom Row: Price, Stepper, and Buy Button */}
-                <div className="pt-2 flex items-center justify-between gap-2 border-t border-[#EAE6DF]/60 dark:border-[#2D3835]">
-                  <div>
-                    <span className="text-lg font-extrabold text-[#FF6548]">₹{item.currentPrice}</span>
-                    {item.discountPercent > 0 && (
-                      <span className="text-xs text-[#8A847E] line-through ml-1">₹{item.originalPrice}</span>
-                    )}
-                    <span className="text-[11px] text-[#8A847E] block">/ {item.unit}</span>
-                  </div>
+                {/* Bottom Row: Price, Stepper, Add to Cart & Buy Buttons */}
+                <div className="pt-2 flex flex-col gap-2 border-t border-[#EAE6DF]/60 dark:border-[#2D3835]">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-lg font-extrabold text-[#FF6548]">₹{item.currentPrice}</span>
+                      {item.discountPercent > 0 && (
+                        <span className="text-xs text-[#8A847E] line-through ml-1">₹{item.originalPrice}</span>
+                      )}
+                      <span className="text-[11px] text-[#8A847E]"> / {item.unit}</span>
+                    </div>
 
-                  <div className="flex items-center gap-2">
+                    {/* Stepper */}
                     <div className="flex items-center border border-[#EAE6DF] dark:border-[#2D3835] rounded-lg bg-white dark:bg-[#1F2825] overflow-hidden">
                       <button
                         onClick={() => updateQty(item.id, -1)}
@@ -3168,7 +3381,7 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
                         <Minus className="h-3 w-3" />
                       </button>
                       <span className="px-2 py-1 text-xs font-bold text-[#2E221F] dark:text-[#F0F4F2] min-w-[20px] text-center">
-                        {quantities[item.id] || 0}
+                        {quantities[item.id] || 1}
                       </span>
                       <button
                         onClick={() => updateQty(item.id, 1)}
@@ -3177,12 +3390,22 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
                         <Plus className="h-3 w-3" />
                       </button>
                     </div>
+                  </div>
 
+                  {/* Actions: Add to Cart + Instant Buy */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => addToCart(item, qtySelected)}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-[#00897B] text-[#00897B] dark:text-[#2DD4BF] text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors cursor-pointer"
+                    >
+                      <ShoppingCart className="h-3.5 w-3.5" />
+                      <span>Add to Cart</span>
+                    </button>
                     <button
                       onClick={() => handleBuy(item)}
-                      className="ss-btn-coral px-4 py-2 text-xs font-semibold shadow-sm cursor-pointer"
+                      className="w-full ss-btn-coral py-2 text-xs font-semibold shadow-sm cursor-pointer"
                     >
-                      Buy
+                      Instant Pass
                     </button>
                   </div>
                 </div>
@@ -3191,6 +3414,112 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
           })
         )}
       </div>
+
+      {/* Cart Modal / Drawer */}
+      {cartOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-[#1C2523] border border-[#EAE6DF] dark:border-[#2D3835] shadow-2xl p-6 space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-[#EAE6DF] dark:border-[#2D3835]">
+              <div className="flex items-center gap-2">
+                <div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-100 dark:bg-emerald-950 text-[#00897B] dark:text-[#2DD4BF]">
+                  <ShoppingCart className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-[#2E221F] dark:text-[#F0F4F2]">Your Food Rescue Cart</h3>
+                  <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC]">{cart.length} item(s) selected</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCartOpen(false)}
+                className="p-1.5 rounded-lg text-[#8A847E] hover:bg-[#F5F5F3] dark:hover:bg-[#25302D] cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {cart.length === 0 ? (
+              <div className="py-8 text-center space-y-2">
+                <ShoppingCart className="h-10 w-10 text-[#A3B2AC] mx-auto" />
+                <p className="text-sm font-semibold text-[#554F4A] dark:text-[#CBD5E1]">Your cart is empty</p>
+                <p className="text-xs text-[#8A847E]">Browse surplus items above and tap "Add to Cart".</p>
+              </div>
+            ) : (
+              <>
+                <div className="max-h-60 overflow-y-auto space-y-2.5 divide-y divide-[#EAE6DF]/60 dark:divide-[#2D3835]">
+                  {cart.map(({ item, qty }) => (
+                    <div key={item.id} className="pt-2 flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-xs text-[#2E221F] dark:text-[#F0F4F2] truncate">{item.name}</p>
+                        <p className="text-[11px] text-[#7A746E] dark:text-[#A3B2AC]">
+                          {item.store} • ₹{item.currentPrice}/{item.unit}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center border border-[#EAE6DF] dark:border-[#2D3835] rounded-md overflow-hidden text-xs">
+                          <button
+                            onClick={() => {
+                              if (qty <= 1) {
+                                setCart(prev => prev.filter(c => c.item.id !== item.id));
+                              } else {
+                                setCart(prev => prev.map(c => c.item.id === item.id ? { ...c, qty: c.qty - 1 } : c));
+                              }
+                            }}
+                            className="px-2 py-0.5 hover:bg-[#F5F5F3] dark:hover:bg-[#25302D]"
+                          >
+                            <Minus className="h-3 w-3" />
+                          </button>
+                          <span className="px-2 py-0.5 font-bold">{qty}</span>
+                          <button
+                            onClick={() => {
+                              setCart(prev => prev.map(c => c.item.id === item.id ? { ...c, qty: c.qty + 1 } : c));
+                            }}
+                            className="px-2 py-0.5 hover:bg-[#F5F5F3] dark:hover:bg-[#25302D]"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </button>
+                        </div>
+                        <span className="text-xs font-bold text-[#FF6548] min-w-[50px] text-right">
+                          ₹{item.currentPrice * qty}
+                        </span>
+                        <button
+                          onClick={() => setCart(prev => prev.filter(c => c.item.id !== item.id))}
+                          className="p-1 text-[#8A847E] hover:text-red-500 cursor-pointer"
+                          title="Remove item"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-3 border-t border-[#EAE6DF] dark:border-[#2D3835] space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-[#7A746E] dark:text-[#A3B2AC]">Total payable at pickup</span>
+                    <span className="font-extrabold text-lg text-[#FF6548]">₹{cartTotal}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-2">
+                    <button
+                      onClick={() => setCart([])}
+                      className="py-2.5 rounded-xl border border-[#EAE6DF] dark:border-[#2D3835] text-xs font-semibold text-[#7A746E] hover:bg-[#F5F5F3] dark:hover:bg-[#25302D] cursor-pointer"
+                    >
+                      Clear Cart
+                    </button>
+                    <button
+                      onClick={checkoutCart}
+                      className="py-2.5 rounded-xl bg-[#00897B] hover:bg-[#00796B] text-white text-xs font-bold shadow-md cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span>Reserve All & Get Passes</span>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {detailItem && (
         <ProductDetailModal
