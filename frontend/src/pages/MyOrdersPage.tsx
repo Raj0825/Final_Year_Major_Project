@@ -169,7 +169,6 @@ export default function MyOrdersPage() {
                   {o.holdExpiresAt && <CountdownTimer expiresAt={o.holdExpiresAt} />}
                 </div>
               )}
-              )}
             </div>
           ))}
         </div>
