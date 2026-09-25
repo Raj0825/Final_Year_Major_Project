@@ -109,13 +109,27 @@ export const DEFAULT_STORES: RegisteredStore[] = [];
 
 // Storage Keys (v4 clean slate)
 const STORAGE_KEYS = {
-  INVENTORY: "ss_inventory_v4",
-  ORDERS: "ss_orders_v4",
-  NOTIFS: "ss_notifs_v4",
-  SETTINGS: "ss_settings_v4",
-  STORES: "ss_stores_v4",
+  INVENTORY: "ss_inventory_v4",      // GLOBAL — shared across all users
+  ORDERS: "ss_orders_v4",            // GLOBAL — shared across all users
+  NOTIFS: "ss_notifs_v4",            // GLOBAL — shared across all users
+  STORES: "ss_stores_v4",            // GLOBAL — shared across all users
+  CURRENT_EMAIL: "ss_current_email", // which user is active right now
   INITIALIZED: "ss_v4_clean_slate_done"
 };
+
+// Returns the per-user settings localStorage key for the given email
+function settingsKeyForEmail(email: string): string {
+  return `ss_settings_v4_${email.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
+}
+
+// Get the email of the currently logged-in user
+export function getCurrentUserEmail(): string {
+  return localStorage.getItem(STORAGE_KEYS.CURRENT_EMAIL) || "";
+}
+
+export function setCurrentUserEmail(email: string) {
+  localStorage.setItem(STORAGE_KEYS.CURRENT_EMAIL, email.toLowerCase());
+}
 
 // Purge obsolete mock data from legacy sessions
 (() => {
@@ -269,12 +283,24 @@ export function saveNotifications(notifs: AppNotification[]) {
   } catch {}
 }
 
-// User Settings Management
+// User Settings Management — Per-user isolated, keyed by email
+// Inventory / Stores / Orders remain GLOBAL and shared between all users.
+
 export function loadSettings(): UserSettings {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-    if (raw) {
-      const parsed = JSON.parse(raw);
+    // First try the current logged-in user's own settings
+    const email = getCurrentUserEmail();
+    if (email) {
+      const raw = localStorage.getItem(settingsKeyForEmail(email));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return { ...DEFAULT_SETTINGS, ...parsed };
+      }
+    }
+    // Fallback: legacy single-key (for existing sessions)
+    const legacyRaw = localStorage.getItem("ss_settings_v4");
+    if (legacyRaw) {
+      const parsed = JSON.parse(legacyRaw);
       return { ...DEFAULT_SETTINGS, ...parsed };
     }
   } catch {}
@@ -283,7 +309,16 @@ export function loadSettings(): UserSettings {
 
 export function saveSettings(settings: UserSettings) {
   try {
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+    const email = settings.email || getCurrentUserEmail();
+    if (email) {
+      // Save under per-user key
+      localStorage.setItem(settingsKeyForEmail(email), JSON.stringify(settings));
+      // Also update the current email pointer
+      setCurrentUserEmail(email);
+    } else {
+      // Fallback: save to legacy key
+      localStorage.setItem("ss_settings_v4", JSON.stringify(settings));
+    }
     window.dispatchEvent(new Event("ss_settings_updated"));
   } catch {}
 }

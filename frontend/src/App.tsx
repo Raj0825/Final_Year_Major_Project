@@ -24,7 +24,7 @@ import {
   loadInventory, saveInventory, loadOrders, saveOrders, loadNotifications,
   saveNotifications, loadSettings, saveSettings, addReservation,
   fulfillPickupOrder, cancelPickupOrder, loadStores, saveStores, upsertStore,
-  calculateDistance, clearAllData, InventoryItem, StoreOrder,
+  calculateDistance, clearAllData, setCurrentUserEmail, InventoryItem, StoreOrder,
   AppNotification, UserSettings, RegisteredStore
 } from "@/data/mockStore";
 
@@ -318,6 +318,9 @@ function Login() {
           localStorage.setItem("fr_user", JSON.stringify(registeredUser));
         }
       }
+
+      // Set the current user email FIRST so saveSettings writes to the right per-user key
+      setCurrentUserEmail(email);
 
       // Synchronize User and Store Settings
       const currentSettings = loadSettings();
