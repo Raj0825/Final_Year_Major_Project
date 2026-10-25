@@ -1,4 +1,4 @@
-﻿// LiveMapView.tsx - Interactive Leaflet map for FreshRescue
+// LiveMapView.tsx - Interactive Leaflet map for FreshRescue
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { MapPin, Navigation, RefreshCw, Filter, Store, AlertTriangle, X, ZoomIn, ZoomOut, Clock3, Leaf, Package } from 'lucide-react';
 import { loadInventory, loadStores, loadSettings, calculateDistance } from '@/data/mockStore';
@@ -24,18 +24,18 @@ function deterministicCoords(seed, baseLat, baseLng) {
 const DC = { lat: 28.6139, lng: 77.209 };
 
 export default function LiveMapView() {
-  const mapRef = useRef(null);
-  const lmRef = useRef(null);
-  const mksRef = useRef([]);
-  const radRef = useRef(null);
-  const uMkRef = useRef(null);
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const lmRef = useRef<any>(null);
+  const mksRef = useRef<any[]>([]);
+  const radRef = useRef<any>(null);
+  const uMkRef = useRef<any>(null);
   const [settings, setSettings] = useState(() => loadSettings());
   const [inventory, setInventory] = useState(() => loadInventory());
   const [stores, setStores] = useState(() => loadStores());
-  const [userPos, setUserPos] = useState(null);
+  const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
-  const [gpsError, setGpsError] = useState(null);
-  const [selected, setSelected] = useState(null);
+  const [gpsError, setGpsError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<any>(null);
   const [filterMode, setFilterMode] = useState('all');
   const [mapReady, setMapReady] = useState(false);
   const [stats, setStats] = useState({ total: 0, urgent: 0, sw: 0 });
