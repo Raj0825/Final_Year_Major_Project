@@ -70,6 +70,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/listings/**").permitAll()
                         .requestMatchers("/api/cloud-sync/**").permitAll()
+                        .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/batches/**").hasAnyRole("STORE_MANAGER", "STORE_STAFF")
                         .requestMatchers("/api/orders/**").hasAnyRole("NGO", "CUSTOMER", "STORE_MANAGER", "STORE_STAFF")
                         .anyRequest().authenticated()
