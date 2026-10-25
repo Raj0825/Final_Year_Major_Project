@@ -295,16 +295,11 @@ function Login() {
           registeredUser = res;
           localStorage.setItem("fr_token", res.token);
           localStorage.setItem("fr_user", JSON.stringify(res));
-        } catch {
-          // Local fallback so users are never blocked if backend is offline
-          registeredUser = {
-            token: "local-" + Date.now(),
-            name: name || (role === "supermarket" ? "Store Manager" : "Customer"),
-            email,
-            role: backendRole
-          };
-          localStorage.setItem("fr_token", registeredUser.token);
-          localStorage.setItem("fr_user", JSON.stringify(registeredUser));
+        } catch (regErr: any) {
+          const errMsg = regErr?.response?.data?.message || regErr?.message || "Registration failed. Email may already be in use.";
+          setError(errMsg);
+          setLoading(false);
+          return;
         }
       } else {
         try {
@@ -312,15 +307,11 @@ function Login() {
           registeredUser = res;
           localStorage.setItem("fr_token", res.token);
           localStorage.setItem("fr_user", JSON.stringify(res));
-        } catch {
-          registeredUser = {
-            token: "local-" + Date.now(),
-            name: name || (role === "supermarket" ? "Store Manager" : "Customer"),
-            email,
-            role: role === "supermarket" ? "STORE_MANAGER" : "CUSTOMER"
-          };
-          localStorage.setItem("fr_token", registeredUser.token);
-          localStorage.setItem("fr_user", JSON.stringify(registeredUser));
+        } catch (loginErr: any) {
+          const errMsg = loginErr?.response?.data?.message || loginErr?.message || "Invalid email or password. Please try again.";
+          setError(errMsg);
+          setLoading(false);
+          return;
         }
       }
 
