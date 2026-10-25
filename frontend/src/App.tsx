@@ -33,6 +33,8 @@ import { AreaSelectorModal } from "@/components/modals/AreaSelectorModal";
 import { ProductDetailModal } from "@/components/modals/ProductDetailModal";
 import { EditBatchModal } from "@/components/modals/EditBatchModal";
 import { ReceiptModal } from "@/components/modals/ReceiptModal";
+import LiveMapView from "@/components/LiveMapView";
+import ESGDashboard from "@/components/ESGDashboard";
 
 type AppWorkspaceRole = "supermarket" | "ngo";
 type ToastKind = "success" | "warning" | "error";
@@ -101,7 +103,8 @@ const supermarketNav = [
   { href: "/supermarket/verification?view=requests", label: "Food requests", icon: Users },
   { href: "/supermarket/verification?view=pickups", label: "Pickups", icon: Truck },
   { href: "/supermarket/verification", label: "Verify pickup", icon: BadgeCheck },
-  { href: "/supermarket/impact", label: "Impact", icon: Leaf },
+  { href: "/supermarket/map", label: "Live Map", icon: MapPin },
+  { href: "/supermarket/impact", label: "ESG Impact", icon: Leaf },
 ];
 
 // Customer & NGO Navigation (Removed Verify pickup as requested)
@@ -110,7 +113,8 @@ const ngoNav = [
   { href: "/ngo/available-food", label: "Food available nearby", icon: Boxes },
   { href: "/ngo/history", label: "My orders", icon: ClipboardCheck },
   { href: "/ngo/active", label: "My pickups", icon: Truck },
-  { href: "/ngo/impact", label: "Impact", icon: Leaf },
+  { href: "/ngo/map", label: "Live Map", icon: MapPin },
+  { href: "/ngo/impact", label: "ESG Impact", icon: Leaf },
 ];
 
 function Logo({ dark = false }: { dark?: boolean }) {
@@ -269,6 +273,7 @@ function Login() {
   const [storeArea, setStoreArea] = useState("");
   const [userLocation, setUserLocation] = useState("");
   const [selectedArea, setSelectedArea] = useState("");
+  const [city, setCity] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -332,10 +337,12 @@ function Login() {
         ...(role === "supermarket" ? {
           storeName: storeName.trim() || currentSettings.storeName || "City Supermarket",
           storeLocation: storeLocation.trim() || currentSettings.storeLocation || "Market Main Road",
-          storeArea: storeArea.trim() || currentSettings.storeArea || "Central Market"
+          storeArea: storeArea.trim() || currentSettings.storeArea || "Central Market",
+          storeCity: city.trim() || currentSettings.storeCity || ""
         } : {
           userLocation: userLocation.trim() || currentSettings.userLocation || "Home Address",
-          selectedArea: selectedArea.trim() || currentSettings.selectedArea || "Central Market"
+          selectedArea: selectedArea.trim() || currentSettings.selectedArea || "Central Market",
+          userCity: city.trim() || currentSettings.userCity || ""
         })
       };
       saveSettings(nextSettings);
@@ -346,6 +353,7 @@ function Login() {
           name: nextSettings.storeName,
           location: nextSettings.storeLocation,
           area: nextSettings.storeArea,
+          city: nextSettings.storeCity,
           managerName: nextSettings.name
         });
       }
@@ -461,6 +469,10 @@ function Login() {
                         <label className="block text-xs font-semibold text-[#2D2320]">Area / Neighborhood</label>
                         <input value={storeArea} onChange={e => setStoreArea(e.target.value)} required className="ss-input mt-1 text-sm" placeholder="e.g. Central Market" />
                       </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-[#2D2320]">City <span className="text-rose-500">*</span></label>
+                        <input value={city} onChange={e => setCity(e.target.value)} required className="ss-input mt-1 text-sm" placeholder="e.g. Pune, Mumbai, Delhi, Bangalore" />
+                      </div>
                     </>
                   ) : (
                     <>
@@ -471,6 +483,10 @@ function Login() {
                       <div>
                         <label className="block text-xs font-semibold text-[#2D2320]">Area / Neighborhood</label>
                         <input value={selectedArea} onChange={e => setSelectedArea(e.target.value)} required className="ss-input mt-1 text-sm" placeholder="e.g. Central Market" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-[#2D2320]">City <span className="text-rose-500">*</span></label>
+                        <input value={city} onChange={e => setCity(e.target.value)} required className="ss-input mt-1 text-sm" placeholder="e.g. Pune, Mumbai, Delhi, Bangalore" />
                       </div>
                     </>
                   )}
@@ -1095,12 +1111,21 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
     const d = new Date(); d.setDate(d.getDate() + 2);
     return d.toISOString().split("T")[0];
   });
+  const [newStoreCity, setNewStoreCity] = useState(() => loadSettings().storeCity || "");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const handleUpdate = () => setInventory(loadInventory());
+    const handleUpdate = () => {
+      setInventory(loadInventory());
+      const s = loadSettings();
+      if (s.storeCity) setNewStoreCity(s.storeCity);
+    };
     window.addEventListener("ss_inventory_updated", handleUpdate);
-    return () => window.removeEventListener("ss_inventory_updated", handleUpdate);
+    window.addEventListener("ss_settings_updated", handleUpdate);
+    return () => {
+      window.removeEventListener("ss_inventory_updated", handleUpdate);
+      window.removeEventListener("ss_settings_updated", handleUpdate);
+    };
   }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -1111,7 +1136,13 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
       const currentStoreName = settings.storeName?.trim() || "My Supermarket";
       const currentStoreLocation = settings.storeLocation?.trim() || "Market Main Branch";
       const currentStoreArea = settings.storeArea?.trim() || "Central Market";
+      const effectiveCity = newStoreCity.trim() || settings.storeCity?.trim() || "";
       const storeInitials = currentStoreName.substring(0, 2).toUpperCase() || "SM";
+
+      // If user typed city in this form, persist it to store settings as well
+      if (newStoreCity.trim() && newStoreCity.trim() !== settings.storeCity) {
+        saveSettings({ ...settings, storeCity: newStoreCity.trim() });
+      }
 
       // Calculate expiry hours from selected date
       const expiryMs = new Date(newExpiryDate).getTime() - Date.now();
@@ -1150,6 +1181,7 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
         store: currentStoreName,
         storeLocation: currentStoreLocation,
         storeArea: currentStoreArea,
+        storeCity: effectiveCity,
         distance: "0.8 km",
         freshnessScore,
         storageTip: "Store in appropriate temperature and humidity controls."
@@ -1160,6 +1192,7 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
         name: currentStoreName,
         location: currentStoreLocation,
         area: currentStoreArea,
+        city: effectiveCity,
         phone: settings.storePhone,
         managerName: settings.name
       });
@@ -1622,6 +1655,24 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
                     </p>
                   )}
                 </div>
+              </div>
+
+              {/* Store City */}
+              <div>
+                <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">
+                  Store City <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newStoreCity}
+                  onChange={e => setNewStoreCity(e.target.value)}
+                  required
+                  placeholder="e.g. Pune, Mumbai, Delhi, Bangalore"
+                  className="ss-input mt-1"
+                />
+                <p className="text-[11px] text-[#7A746E] dark:text-[#A3B2AC] mt-0.5">
+                  Customers in this city will see this food batch in their nearby surplus feed.
+                </p>
               </div>
 
               {/* Expiry urgency indicator */}
@@ -2524,96 +2575,7 @@ function VerificationPage({ onAction }: { onAction: (message: string, kind?: Toa
 // SUPERMARKET WORKSPACE: IMPACT & ESG
 // -------------------------------------------------------------
 function ImpactPage() {
-  const [timeframe, setTimeframe] = useState<"week" | "month" | "all">("month");
-  const [generating, setGenerating] = useState(false);
-
-  const stats = {
-    week: { food: "1.2 Tonnes", co2: "3.1 T CO₂e", meals: "480 Meals", savings: "₹38,400" },
-    month: { food: "4.6 Tonnes", co2: "11.5 T CO₂e", meals: "1,860 Meals", savings: "₹1,48,800" },
-    all: { food: "28.4 Tonnes", co2: "71.2 T CO₂e", meals: "11,400 Meals", savings: "₹9,12,000" }
-  }[timeframe];
-
-  const handleDownloadReport = () => {
-    setGenerating(true);
-    setTimeout(() => {
-      setGenerating(false);
-      const content = `SMART SURPLUS - CERTIFIED ESG SUSTAINABILITY AUDIT\n\nReporting Period: ${timeframe.toUpperCase()}\nFood Rescued: ${stats.food}\nMethane Emissions Avoided: ${stats.co2}\nMeals Redistributed: ${stats.meals}\nEstimated Value Saved: ${stats.savings}\nGenerated at: ${new Date().toLocaleString()}`;
-      const blob = new Blob([content], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `ESG_Impact_Report_${timeframe}.txt`;
-      a.click();
-    }, 800);
-  };
-
-  return (
-    <div className="ss-reveal max-w-5xl mx-auto space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-[#00897B] dark:text-[#2DD4BF]">SUSTAINABILITY & ESG</p>
-          <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] dark:text-[#F0F4F2] mt-1">Supermarket Impact Telemetry</h1>
-          <p className="text-sm text-[#78726B] dark:text-[#A3B2AC] mt-1">Every batch rescued prevents organic landfill waste, cuts methane emissions, and feeds the community.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {(["week", "month", "all"] as const).map(tf => (
-            <button
-              key={tf}
-              onClick={() => setTimeframe(tf)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold capitalize transition-all cursor-pointer ${
-                timeframe === tf
-                  ? "bg-[#2D2320] dark:bg-white text-white dark:text-[#2D2320] shadow-sm"
-                  : "bg-white dark:bg-[#25302D] text-[#7A746E] dark:text-[#A3B2AC] border border-[#EAE6DF] dark:border-[#2D3835]"
-              }`}
-            >
-              {tf === "all" ? "All Time" : `This ${tf}`}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-4">
-        <div className="ss-card p-5 bg-white dark:bg-[#1F2825]">
-          <p className="text-xs font-medium text-[#7D7670] dark:text-[#A3B2AC]">Food Rescued</p>
-          <p className="mt-3 text-3xl font-extrabold text-[#2E221F] dark:text-[#F0F4F2]">{stats.food}</p>
-          <p className="mt-2 text-xs text-[#8A847E] dark:text-[#64748B]">Prevented from waste bins</p>
-        </div>
-        <div className="ss-card p-5 bg-white dark:bg-[#1F2825]">
-          <p className="text-xs font-medium text-[#7D7670] dark:text-[#A3B2AC]">Methane Avoided</p>
-          <p className="mt-3 text-3xl font-extrabold text-[#00897B] dark:text-[#2DD4BF]">{stats.co2}</p>
-          <p className="mt-2 text-xs text-[#8A847E] dark:text-[#64748B]">Carbon footprint reduction</p>
-        </div>
-        <div className="ss-card p-5 bg-white dark:bg-[#1F2825]">
-          <p className="text-xs font-medium text-[#7D7670] dark:text-[#A3B2AC]">Meals Redistributed</p>
-          <p className="mt-3 text-3xl font-extrabold text-[#FF6548]">{stats.meals}</p>
-          <p className="mt-2 text-xs text-[#8A847E] dark:text-[#64748B]">Nutritious food saved</p>
-        </div>
-        <div className="ss-card p-5 bg-white dark:bg-[#1F2825]">
-          <p className="text-xs font-medium text-[#7D7670] dark:text-[#A3B2AC]">Direct Savings</p>
-          <p className="mt-3 text-3xl font-extrabold text-[#2E221F] dark:text-[#F0F4F2]">{stats.savings}</p>
-          <p className="mt-2 text-xs text-[#8A847E] dark:text-[#64748B]">Saved by community</p>
-        </div>
-      </div>
-
-      <div className="ss-card p-6 bg-[#343D3B] text-white flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-        <div>
-          <span className="text-xs font-bold uppercase tracking-wider text-[#FF6548]">Certified ESG Telemetry</span>
-          <h2 className="text-2xl font-bold mt-1">Zero-Waste Supermarket Initiative</h2>
-          <p className="text-[#B0B8B5] text-sm mt-2 max-w-xl leading-relaxed">
-            Verified under the Smart Surplus Food Waste Recovery Protocol. All fulfilled pickup transactions are cryptographically logged for municipal and CSR sustainability compliance.
-          </p>
-        </div>
-        <button
-          onClick={handleDownloadReport}
-          disabled={generating}
-          className="ss-btn-coral px-5 py-3 text-xs font-bold shrink-0 flex items-center justify-center gap-2 cursor-pointer shadow-md"
-        >
-          {generating ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-          {generating ? "Generating..." : "Download ESG Report"}
-        </button>
-      </div>
-    </div>
-  );
+  return <ESGDashboard />;
 }
 
 // -------------------------------------------------------------
@@ -3092,32 +3054,63 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
   };
 
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [compareMode, setCompareMode] = useState(false);
+  const [cityModalOpen, setCityModalOpen] = useState(false);
 
-  // Build list of distinct supermarkets
-  const distinctStoreMap = new Map<string, { name: string; location: string; distance: string }>();
-  stores.forEach(s => {
+  // The user's city (normalised for comparison)
+  const userCity = (settings.userCity || "").trim().toLowerCase();
+
+  // Helper: check if a store/item is in the user's city
+  const isSameCity = (storeCity?: string, storeName?: string) => {
+    if (!userCity) return true; // if user hasn't set city, show everything
+    const effectiveCity = (storeCity || (storeName ? stores.find(s => s.name.toLowerCase() === storeName.toLowerCase())?.city : "") || "").trim().toLowerCase();
+    if (!effectiveCity) return false; // item with no city set can't match
+    return effectiveCity === userCity || effectiveCity.includes(userCity) || userCity.includes(effectiveCity);
+  };
+
+  // City-filtered inventory: only items whose store is in the user's city (+ within radius)
+  const cityFilteredInventory = inventory.filter(item => {
+    // City match
+    if (!isSameCity(item.storeCity, item.store)) return false;
+    // Distance / radius check (when user has set location)
+    if (settings.userLocation || settings.selectedArea) {
+      const dist = calculateDistance(settings.userLocation || settings.selectedArea, item.storeLocation || item.store);
+      if (settings.searchRadiusKm && dist.km > settings.searchRadiusKm) return false;
+    }
+    return true;
+  });
+
+  // City-filtered stores list
+  const cityFilteredStores = stores.filter(s => isSameCity(s.city, s.name));
+
+  // Build list of distinct supermarkets (only city-matched)
+  const distinctStoreMap = new Map<string, { name: string; location: string; city: string; distance: string }>();
+  cityFilteredStores.forEach(s => {
     distinctStoreMap.set(s.name.toLowerCase(), {
       name: s.name,
       location: s.location,
+      city: s.city || "",
       distance: calculateDistance(settings.userLocation || settings.selectedArea, s.location || s.area).display
     });
   });
-  inventory.forEach(i => {
+  cityFilteredInventory.forEach(i => {
     if (!distinctStoreMap.has(i.store.toLowerCase())) {
       distinctStoreMap.set(i.store.toLowerCase(), {
         name: i.store,
         location: i.storeLocation || "Market Area",
+        city: i.storeCity || "",
         distance: calculateDistance(settings.userLocation || settings.selectedArea, i.storeLocation || i.store).display
       });
     }
   });
   const distinctStores = Array.from(distinctStoreMap.values());
 
-  const filtered = inventory.filter(item => {
+  const filtered = cityFilteredInventory.filter(item => {
     const matchCategory = selectedCategory === "All" || item.category.toLowerCase() === selectedCategory.toLowerCase();
     const matchStore = selectedStore === "All" || item.store.toLowerCase() === selectedStore.toLowerCase();
     const matchFav = !favoritesOnly || favorites.includes(item.store);
-    const matchQuery = item.name.toLowerCase().includes(query.toLowerCase()) ||
+    const matchQuery = !query.trim() ||
+                       item.name.toLowerCase().includes(query.toLowerCase()) ||
                        item.store.toLowerCase().includes(query.toLowerCase()) ||
                        (item.storeLocation && item.storeLocation.toLowerCase().includes(query.toLowerCase()));
     return matchCategory && matchStore && matchFav && matchQuery;
@@ -3129,6 +3122,32 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
     return distA - distB;
   });
 
+  // Compare mode: ranked items sorted by price ascending for direct cross-store price comparison
+  const compareRankedItems = (() => {
+    if (!compareMode || !query.trim()) return [];
+    return [...filtered].sort((a, b) => a.currentPrice - b.currentPrice);
+  })();
+
+  // Compare mode: group items by product name for cross-store comparison
+  const compareGroups = (() => {
+    if (!compareMode || !query.trim()) return [];
+    // Group filtered items by normalised product name
+    const groups = new Map<string, InventoryItem[]>();
+    filtered.forEach(item => {
+      const key = item.name.trim().toLowerCase();
+      const arr = groups.get(key) || [];
+      arr.push(item);
+      groups.set(key, arr);
+    });
+    // Sort each group by price ascending for easy comparison
+    return Array.from(groups.entries())
+      .map(([name, items]) => ({
+        productName: items[0].name,
+        items: items.sort((a, b) => a.currentPrice - b.currentPrice)
+      }))
+      .filter(g => g.items.length > 0);
+  })();
+
   return (
     <div className="ss-reveal max-w-6xl mx-auto space-y-6">
       {/* Top Header with Cart Button */}
@@ -3136,13 +3155,55 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
         <div>
           <p className="text-xs font-bold uppercase tracking-wider text-[#00897B] dark:text-[#2DD4BF]">VERIFIED SURPLUS STORES</p>
           <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] dark:text-[#F0F4F2] mt-1">Food available nearby</h1>
-          <p className="text-sm text-[#78726B] dark:text-[#A3B2AC] mt-1">
-            Discounted produce near {settings.userLocation || settings.selectedArea}. Choose store, build a cart, and generate instant QR pickup passes.
+          <p className="text-sm text-[#78726B] dark:text-[#A3B2AC] mt-1 flex items-center gap-2 flex-wrap">
+            {userCity ? (
+              <>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold border border-emerald-200 dark:border-emerald-800">
+                  <MapPin className="h-3 w-3" />
+                  {settings.userCity}
+                </span>
+                <span>•</span>
+                <span>Stores in {settings.userCity} within {settings.searchRadiusKm} km</span>
+                <button
+                  type="button"
+                  onClick={() => setCityModalOpen(true)}
+                  className="text-[11px] font-bold text-[#00897B] dark:text-[#2DD4BF] hover:underline cursor-pointer ml-1"
+                >
+                  Change City / Radius
+                </button>
+              </>
+            ) : (
+              <span className="flex items-center gap-1.5 flex-wrap">
+                <span>Set your city to filter stores in your city.</span>
+                <button
+                  type="button"
+                  onClick={() => setCityModalOpen(true)}
+                  className="px-2.5 py-0.5 rounded-md bg-[#00897B] hover:bg-[#00796B] text-white text-[11px] font-bold cursor-pointer"
+                >
+                  📍 Set City
+                </button>
+              </span>
+            )}
           </p>
         </div>
 
-        {/* Cart Quick Button */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {/* Compare Prices Toggle */}
+          <button
+            onClick={() => setCompareMode(prev => !prev)}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              compareMode
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
+            }`}
+            title="Compare the same product across different stores by price"
+          >
+            <ArrowUpDown className={`h-4 w-4 ${compareMode ? "text-white" : "text-indigo-500"}`} />
+            <span>Compare Prices</span>
+          </button>
+
+          {/* Favorites Toggle */}
           <button
             onClick={() => setFavoritesOnly(prev => !prev)}
             className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
@@ -3156,6 +3217,7 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
             <span>Favorites {favorites.length > 0 ? `(${favorites.length})` : ""}</span>
           </button>
 
+          {/* Cart Button */}
           <button
             onClick={() => setCartOpen(true)}
             className="relative flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#00897B] hover:bg-[#00796B] text-white text-xs font-bold shadow-sm transition-all cursor-pointer"
@@ -3168,6 +3230,28 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
           </button>
         </div>
       </div>
+
+      {/* City Not Set Warning */}
+      {!userCity && inventory.length > 0 && (
+        <div className="p-4 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-bold text-amber-700 dark:text-amber-300">City not set — currently showing all stores</p>
+              <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">
+                Set your city to only see supermarkets located in your city or neighborhood.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCityModalOpen(true)}
+            className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+          >
+            <MapPin className="h-3.5 w-3.5" /> Set City
+          </button>
+        </div>
+      )}
 
       {/* Supermarket Filter Bar */}
       {distinctStores.length > 0 && (
@@ -3183,11 +3267,11 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
                 : "border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
             }`}
           >
-            All Stores ({inventory.length})
+            All Stores ({cityFilteredInventory.length})
           </button>
           {distinctStores.map(s => {
             const isSelected = selectedStore.toLowerCase() === s.name.toLowerCase();
-            const count = inventory.filter(i => i.store.toLowerCase() === s.name.toLowerCase()).length;
+            const count = cityFilteredInventory.filter(i => i.store.toLowerCase() === s.name.toLowerCase()).length;
             const isFav = favorites.includes(s.name);
             return (
               <div
@@ -3227,7 +3311,10 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search food, supermarket name, or address..."
+            placeholder={compareMode
+              ? "Type a product name (e.g. Paneer, Milk, Dahi) to compare prices across stores..."
+              : "Search food, supermarket name, or address..."
+            }
             className="ss-input text-sm"
             style={{ paddingLeft: "2.6rem" }}
           />
@@ -3262,7 +3349,217 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
         </div>
       </div>
 
-      {/* 3-Column Food Grid */}
+      {/* Quick Compare Chips */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+        <span className="text-[#7A746E] dark:text-[#A3B2AC] font-semibold shrink-0">Quick Compare:</span>
+        {[
+          { label: "🧀 Paneer", term: "Paneer" },
+          { label: "🥛 Milk", term: "Milk" },
+          { label: "🥣 Dahi", term: "Dahi" },
+          { label: "🍞 Bread", term: "Bread" },
+          { label: "🍎 Apples", term: "Apple" },
+          { label: "🍅 Tomatoes", term: "Tomato" },
+        ].map(chip => (
+          <button
+            key={chip.term}
+            onClick={() => {
+              setQuery(chip.term);
+              setCompareMode(true);
+            }}
+            className={`px-3 py-1 rounded-lg border text-xs font-semibold shrink-0 transition-all cursor-pointer ${
+              query.toLowerCase() === chip.term.toLowerCase() && compareMode
+                ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                : "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
+            }`}
+          >
+            {chip.label}
+          </button>
+        ))}
+        {query && (
+          <button
+            onClick={() => { setQuery(""); setCompareMode(false); }}
+            className="text-[11px] text-[#FF6548] font-semibold hover:underline shrink-0 px-1 cursor-pointer"
+          >
+            Clear Search
+          </button>
+        )}
+      </div>
+
+      {/* Compare Prices View */}
+      {compareMode && query.trim() && compareRankedItems.length > 0 && (() => {
+        const minPrice = compareRankedItems[0].currentPrice;
+        const maxPrice = compareRankedItems[compareRankedItems.length - 1].currentPrice;
+        const bestStore = compareRankedItems[0].store;
+        const distinctStoresCount = new Set(compareRankedItems.map(i => i.store)).size;
+
+        return (
+          <div className="space-y-4 ss-reveal">
+            {/* Price Comparison Summary Banner */}
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-50 to-emerald-50 dark:from-indigo-950/40 dark:to-emerald-950/40 border border-indigo-200 dark:border-indigo-900 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-600 text-white shrink-0 shadow-xs">
+                  <ArrowUpDown className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-[#2E221F] dark:text-[#F0F4F2]">
+                    Price Comparison for "{query}" across {distinctStoresCount} store{distinctStoresCount !== 1 ? "s" : ""}
+                  </h2>
+                  <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-0.5">
+                    Found {compareRankedItems.length} option{compareRankedItems.length !== 1 ? "s" : ""} in {settings.userCity || "your area"} — ranked by lowest price
+                  </p>
+                </div>
+              </div>
+
+              {compareRankedItems.length > 1 && maxPrice > minPrice && (
+                <div className="text-left sm:text-right shrink-0">
+                  <span className="text-[11px] font-semibold text-[#7A746E] dark:text-[#A3B2AC] block">Best Price at {bestStore}</span>
+                  <span className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400">
+                    Save up to ₹{maxPrice - minPrice}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Comparison Cards / Rows */}
+            <div className="ss-card bg-white dark:bg-[#1F2825] overflow-hidden divide-y divide-[#EAE6DF]/60 dark:divide-[#2D3835]">
+              {compareRankedItems.map((item, idx) => {
+                const itemDist = calculateDistance(settings.userLocation || settings.selectedArea, item.storeLocation || item.store);
+                const isCheapest = idx === 0 && compareRankedItems.length > 1;
+                const qtySelected = quantities[item.id] > 0 ? quantities[item.id] : 1;
+
+                return (
+                  <div
+                    key={item.id}
+                    className={`p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors ${
+                      isCheapest ? "bg-emerald-50/40 dark:bg-emerald-950/20" : "hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
+                    }`}
+                  >
+                    <div className="flex items-start sm:items-center gap-3.5 flex-1 min-w-0">
+                      {/* Rank Number */}
+                      <div className={`grid h-8 w-8 place-items-center rounded-xl text-xs font-black shrink-0 ${
+                        isCheapest
+                          ? "bg-emerald-500 text-white shadow-xs"
+                          : "bg-[#F5F5F3] dark:bg-[#25302D] text-[#7A746E] dark:text-[#A3B2AC]"
+                      }`}>
+                        #{idx + 1}
+                      </div>
+
+                      {/* Item & Store Details */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-bold text-sm text-[#2E221F] dark:text-[#F0F4F2]">{item.name}</h3>
+                          {isCheapest && (
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-extrabold text-[10px] tracking-wide border border-emerald-300 dark:border-emerald-700">
+                              ★ BEST PRICE
+                            </span>
+                          )}
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-[#FAF8F5] dark:bg-[#161D1B] border border-[#EAE6DF] dark:border-[#2D3835] text-[#7A746E] dark:text-[#A3B2AC] font-semibold">
+                            {item.category}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-1 flex-wrap">
+                          <span className="font-bold text-[#00897B] dark:text-[#2DD4BF] flex items-center gap-1">
+                            <Store className="h-3 w-3" /> {item.store}
+                          </span>
+                          <span>•</span>
+                          <span>{item.storeLocation || item.storeArea || "Market"}</span>
+                          <span>•</span>
+                          <span>📍 {itemDist.display}</span>
+                          <span>•</span>
+                          <span className="text-amber-600 dark:text-amber-400 font-medium">Expires: {item.expiry}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Price & Buying Actions */}
+                    <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-[#EAE6DF]/60 dark:border-[#2D3835]">
+                      <div className="text-left sm:text-right">
+                        <div className="flex items-baseline gap-1.5">
+                          <span className={`text-lg font-extrabold ${isCheapest ? "text-emerald-600 dark:text-emerald-400" : "text-[#FF6548]"}`}>
+                            ₹{item.currentPrice}
+                          </span>
+                          {item.discountPercent > 0 && (
+                            <span className="text-xs text-[#8A847E] line-through">₹{item.originalPrice}</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-[#8A847E] dark:text-[#7A746E]">
+                          {item.available} {item.unit} available
+                        </p>
+                      </div>
+
+                      {/* Stepper */}
+                      <div className="flex items-center border border-[#EAE6DF] dark:border-[#2D3835] rounded-xl overflow-hidden bg-white dark:bg-[#1A2220]">
+                        <button
+                          type="button"
+                          onClick={() => updateQty(item.id, -1)}
+                          className="px-2 py-1.5 hover:bg-[#F5F5F3] dark:hover:bg-[#25302D] text-[#554F4A] dark:text-[#CBD5E1] cursor-pointer"
+                        >
+                          <Minus className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="px-2 py-1.5 font-bold text-xs min-w-[22px] text-center text-[#2E221F] dark:text-[#F0F4F2]">
+                          {quantities[item.id] || 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => updateQty(item.id, 1)}
+                          className="px-2 py-1.5 hover:bg-[#F5F5F3] dark:hover:bg-[#25302D] text-[#554F4A] dark:text-[#CBD5E1] cursor-pointer"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Add to Cart */}
+                      <button
+                        type="button"
+                        onClick={() => addToCart(item, qtySelected)}
+                        className="p-2 rounded-xl border border-[#00897B] text-[#00897B] dark:text-[#2DD4BF] hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors cursor-pointer"
+                        title="Add to cart"
+                      >
+                        <ShoppingCart className="h-4 w-4" />
+                      </button>
+
+                      {/* Buy Button */}
+                      <button
+                        type="button"
+                        onClick={() => handleBuy(item)}
+                        className="px-4 py-2 rounded-xl ss-btn-coral text-xs font-bold cursor-pointer shadow-xs"
+                      >
+                        Buy Now
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Compare mode empty state */}
+      {compareMode && query.trim() && compareRankedItems.length === 0 && (
+        <div className="ss-card p-8 bg-white dark:bg-[#1F2825] text-center space-y-2">
+          <ArrowUpDown className="h-8 w-8 text-[#A3B2AC] mx-auto" />
+          <h3 className="font-bold text-sm text-[#2E221F] dark:text-[#F0F4F2]">No matching products found</h3>
+          <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] max-w-sm mx-auto">
+            No items matching "{query}" were found in stores in {settings.userCity || "your area"}. Try another product like "Milk", "Paneer", or "Bread".
+          </p>
+        </div>
+      )}
+
+      {/* Compare mode hint */}
+      {compareMode && !query.trim() && (
+        <div className="ss-card p-6 bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800 text-center space-y-2">
+          <Search className="h-8 w-8 text-indigo-400 mx-auto" />
+          <h3 className="font-bold text-sm text-indigo-700 dark:text-indigo-300">Compare Prices Mode</h3>
+          <p className="text-xs text-indigo-600 dark:text-indigo-400 max-w-md mx-auto">
+            Type a product name in the search bar (e.g. "Paneer", "Milk", "Dahi", "Apple") to see that item listed across all nearby stores with different pricing. You can compare and buy from the cheapest one!
+          </p>
+        </div>
+      )}
+
+      {/* Normal Grid View — hidden when compareMode is active with a query */}
+      {!(compareMode && query.trim()) && (
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {filtered.length === 0 ? (
           <div className="col-span-full py-16 text-center ss-card p-8 bg-white dark:bg-[#1F2825]">
@@ -3414,6 +3711,7 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
           })
         )}
       </div>
+      )}
 
       {/* Cart Modal / Drawer */}
       {cartOpen && (
@@ -3539,6 +3837,18 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
           order={selectedReceipt}
           isOpen={true}
           onClose={() => setSelectedReceipt(null)}
+        />
+      )}
+
+      {/* Area & City Selector Modal */}
+      {cityModalOpen && (
+        <AreaSelectorModal
+          isOpen={cityModalOpen}
+          onClose={() => setCityModalOpen(false)}
+          onSelected={() => {
+            setSettings(loadSettings());
+            onAction("Location and city settings updated!");
+          }}
         />
       )}
     </div>
@@ -3926,6 +4236,7 @@ function ProductRoute() {
       if (type === "detection") return <DetectionPage onAction={notify} />;
       if (type === "surplus") return <SurplusPage onAction={notify} />;
       if (type === "verification") return <VerificationPage onAction={notify} />;
+      if (type === "map") return <LiveMapView />;
       if (type === "impact") return <ImpactPage />;
       if (type === "notifications") return <NotificationsPage />;
       return <DashboardHome onAction={notify} />;
@@ -3936,6 +4247,7 @@ function ProductRoute() {
       if (type === "available-food" || type === "browse") return <NgoAvailableFood onAction={notify} />;
       if (type === "history" || type === "my-orders") return <NgoHistory />;
       if (type === "active" || type === "my-pickups") return <NgoActivePasses />;
+      if (type === "map") return <LiveMapView />;
       if (type === "impact") return <ImpactPage />;
       if (type === "notifications") return <NotificationsPage />;
       return <NgoOverview onAction={notify} />;

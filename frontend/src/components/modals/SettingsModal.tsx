@@ -25,6 +25,7 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
         name: settings.storeName,
         location: settings.storeLocation,
         area: settings.storeArea,
+        city: settings.storeCity,
         phone: settings.storePhone,
         managerName: settings.name
       });
@@ -69,13 +70,16 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
           ].filter(Boolean);
           const detectedAddress = parts.slice(0, 3).join(", ") || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
           const detectedArea = addr.neighbourhood || addr.suburb || addr.city_district || addr.city || "Local Area";
+          const detectedCity = addr.city || addr.town || addr.county || addr.state || "";
           setSettings(s => ({
             ...s,
             userLocation: detectedAddress,
             selectedArea: detectedArea,
+            userCity: s.userCity || detectedCity,
             gpsLat: latitude,
             gpsLng: longitude,
-            storeLocation: s.role === "supermarket" ? (s.storeLocation || detectedAddress) : s.storeLocation
+            storeLocation: s.role === "supermarket" ? (s.storeLocation || detectedAddress) : s.storeLocation,
+            storeCity: s.role === "supermarket" ? (s.storeCity || detectedCity) : s.storeCity
           }));
           setGpsMsg(`✅ Location detected: ${detectedAddress}`);
         } catch {
@@ -260,6 +264,23 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
                       className="ss-input mt-1 text-sm"
                     />
                   </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">
+                      City <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.storeCity}
+                      onChange={e => setSettings({ ...settings, storeCity: e.target.value })}
+                      placeholder="e.g. Pune, Mumbai, Delhi, Bangalore"
+                      className="ss-input mt-1 text-sm"
+                      required
+                    />
+                    <p className="text-[11px] text-[#7A746E] dark:text-[#A3B2AC] mt-1">
+                      Customers in this city will see your store and items. Enter exact city name.
+                    </p>
+                  </div>
                 </>
               ) : (
                 <>
@@ -322,6 +343,23 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
                   </div>
 
                   <div>
+                    <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">
+                      City <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.userCity}
+                      onChange={e => setSettings({ ...settings, userCity: e.target.value })}
+                      placeholder="e.g. Pune, Mumbai, Delhi, Bangalore"
+                      className="ss-input mt-1 text-sm"
+                      required
+                    />
+                    <p className="text-[11px] text-[#7A746E] dark:text-[#A3B2AC] mt-1">
+                      Only supermarkets in your city (or within your search radius) will appear in the food browse page.
+                    </p>
+                  </div>
+
+                  <div>
                     <div className="flex justify-between items-center">
                       <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">Search Radius</label>
                       <span className="text-xs font-bold text-[#FF6548]">{settings.searchRadiusKm} km</span>
@@ -335,6 +373,9 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
                       onChange={e => setSettings({ ...settings, searchRadiusKm: Number(e.target.value) })}
                       className="w-full mt-2 accent-[#00897B] cursor-pointer"
                     />
+                    <p className="text-[11px] text-[#7A746E] dark:text-[#A3B2AC] mt-1">
+                      Stores within this radius from your location will be shown.
+                    </p>
                   </div>
                 </>
               )}

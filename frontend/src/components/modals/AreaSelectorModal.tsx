@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { X, MapPin, Navigation, Loader2, ExternalLink } from "lucide-react";
-import { loadSettings, saveSettings } from "@/data/mockStore";
+import { loadSettings, saveSettings, upsertStore } from "@/data/mockStore";
 
 interface AreaSelectorModalProps {
   isOpen: boolean;
@@ -13,8 +13,9 @@ export function AreaSelectorModal({ isOpen, onClose, onSelected }: AreaSelectorM
 
   const currentSettings = loadSettings();
   const [userLocation, setUserLocation] = useState(currentSettings.userLocation || "");
-  const [selectedArea, setSelectedArea] = useState(currentSettings.selectedArea || "Central Market");
-  const [radiusKm, setRadiusKm] = useState(currentSettings.searchRadiusKm || 5);
+  const [selectedArea, setSelectedArea] = useState(currentSettings.selectedArea || "");
+  const [userCity, setUserCity] = useState(currentSettings.userCity || currentSettings.storeCity || "");
+  const [radiusKm, setRadiusKm] = useState(currentSettings.searchRadiusKm || 10);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -56,9 +57,11 @@ export function AreaSelectorModal({ isOpen, onClose, onSelected }: AreaSelectorM
           ].filter(Boolean);
           const detectedAddress = parts.slice(0, 3).join(", ");
           const detectedArea = addr.neighbourhood || addr.suburb || addr.quarter || addr.city_district || addr.city || "Local Area";
+          const detectedCity = addr.city || addr.town || addr.county || addr.state || "";
 
           setUserLocation(detectedAddress || `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`);
           setSelectedArea(detectedArea);
+          if (detectedCity && !userCity) setUserCity(detectedCity);
           setGpsError(null);
         } catch {
           // Fallback to raw coordinates if reverse geocoding fails
@@ -89,13 +92,27 @@ export function AreaSelectorModal({ isOpen, onClose, onSelected }: AreaSelectorM
   const handleApply = (e: React.FormEvent) => {
     e.preventDefault();
     const finalLocation = userLocation.trim() || selectedArea;
+    const cityToSave = userCity.trim();
     saveSettings({
       ...currentSettings,
       userLocation: finalLocation,
       selectedArea: selectedArea.trim() || finalLocation,
+      userCity: cityToSave || currentSettings.userCity,
+      storeCity: currentSettings.role === "supermarket" ? (cityToSave || currentSettings.storeCity) : currentSettings.storeCity,
       searchRadiusKm: radiusKm,
       ...(gpsCoords ? { gpsLat: gpsCoords.lat, gpsLng: gpsCoords.lng } : {})
     });
+    if (currentSettings.role === "supermarket") {
+      upsertStore({
+        id: currentSettings.storeId,
+        name: currentSettings.storeName || "My Supermarket",
+        location: currentSettings.storeLocation || finalLocation,
+        area: currentSettings.storeArea || selectedArea.trim(),
+        city: cityToSave || currentSettings.storeCity,
+        phone: currentSettings.storePhone,
+        managerName: currentSettings.name
+      });
+    }
     onSelected(selectedArea.trim() || finalLocation, radiusKm);
     onClose();
   };
@@ -205,6 +222,23 @@ export function AreaSelectorModal({ isOpen, onClose, onSelected }: AreaSelectorM
             />
           </div>
 
+          {/* City Input */}
+          <div>
+            <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5] mb-1">
+              City <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={userCity}
+              onChange={e => setUserCity(e.target.value)}
+              placeholder="e.g. Pune, Mumbai, Delhi, Bangalore"
+              className="ss-input text-sm"
+              required
+            />
+            <p className="text-[11px] text-[#7A746E] dark:text-[#A3B2AC] mt-1">
+              Only supermarkets registered in this city will appear in the browse page.
+            </p>
+          </div>
           {/* Radius Slider */}
           <div className="pt-2 border-t border-[#EAE6DF] dark:border-[#2D3835]">
             <div className="flex justify-between items-center">

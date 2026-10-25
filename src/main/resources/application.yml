@@ -3,25 +3,25 @@ spring:
     name: freshrescue-backend
   data:
     mongodb:
-      uri: mongodb://localhost:27017/freshrescue
+      uri: ${SPRING_DATA_MONGODB_URI:${MONGODB_URI:mongodb://localhost:27017/freshrescue}}
 
 server:
-  port: 8080
+  port: ${PORT:8080}
 
 # Python FastAPI service exposing the CNN + OCR /predict endpoint
 ml:
   service:
-    base-url: http://localhost:8000
+    base-url: ${ML_SERVICE_URL:http://localhost:8000}
     predict-path: /predict
 
 jwt:
   # NOTE: move this to an env var / secrets manager before deploying anywhere real
-  secret: "CHANGE_ME_dev_only_secret_key_please_replace_before_deploy_1234"
+  secret: ${JWT_SECRET:CHANGE_ME_dev_only_secret_key_please_replace_before_deploy_1234}
   expiration-ms: 86400000 # 24h
 
 # Discount tier thresholds, kept configurable rather than hardcoded in the service
 cors:
-  allowed-origins: http://localhost:5173,http://localhost:3000
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
 
 freshness:
   tiers:

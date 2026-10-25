@@ -7,6 +7,7 @@ export interface RegisteredStore {
   name: string;
   location: string; // Street / landmark address
   area: string;     // Area / neighborhood
+  city: string;     // City name for geographic matching
   phone?: string;
   managerName?: string;
   joinedAt: string;
@@ -32,6 +33,7 @@ export interface InventoryItem {
   store: string;
   storeLocation?: string;
   storeArea?: string;
+  storeCity?: string;      // City of the store that listed this item
   distance: string;
   freshnessScore: number;
   storageTip?: string;
@@ -74,9 +76,11 @@ export interface UserSettings {
   storeName: string;
   storeLocation: string;
   storeArea: string;
+  storeCity: string;       // City where the store is located
   storePhone?: string;
   userLocation: string;
   selectedArea: string;
+  userCity: string;        // City where the user/customer lives
   searchRadiusKm: number;
   holdMinutes: number;
   emailAlerts: boolean;
@@ -92,13 +96,15 @@ export const DEFAULT_SETTINGS: UserSettings = {
   email: "store@freshrescue.org",
   role: "supermarket",
   storeId: "store-default",
-  storeName: "City Mart Supermarket",
-  storeLocation: "Market Square, Station Road",
-  storeArea: "Central Market",
-  storePhone: "+91 98000 00000",
-  userLocation: "Green Park Society, Paud Road",
-  selectedArea: "Central Market",
-  searchRadiusKm: 5,
+  storeName: "",
+  storeLocation: "",
+  storeArea: "",
+  storeCity: "",
+  storePhone: "",
+  userLocation: "",
+  selectedArea: "",
+  userCity: "",
+  searchRadiusKm: 10,
   holdMinutes: 15,
   emailAlerts: true,
   smsAlerts: false,
@@ -208,7 +214,8 @@ export function upsertStore(data: Partial<RegisteredStore> & { name: string; loc
     name: data.name.trim(),
     location: data.location.trim(),
     area: data.area ? data.area.trim() : (data.location.split(",")[0] || "Local Area").trim(),
-    phone: data.phone || "+91 98000 00000",
+    city: data.city ? data.city.trim() : "",
+    phone: data.phone || "",
     managerName: data.managerName || "Store Manager",
     joinedAt: data.joinedAt || new Date().toISOString()
   };

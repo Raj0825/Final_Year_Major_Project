@@ -1,0 +1,7 @@
+target/
+.git
+.idea
+node_modules/
+frontend/
+ml_service/
+*.h5
