@@ -1,6 +1,7 @@
 // frontend/src/data/mockStore.ts
 // Unified Reactive Data Store for FreshRescue / Smart Surplus
 // Dynamic multi-store support, proximity calculation, zero-fake clean state
+import api from "../api/client";
 
 export interface RegisteredStore {
   id: string;
@@ -229,6 +230,7 @@ export function upsertStore(data: Partial<RegisteredStore> & { name: string; loc
   }
 
   saveStores(nextStores);
+  api.post("/cloud-sync/stores", updatedRecord).catch(() => {});
   return updatedRecord;
 }
 
@@ -252,6 +254,7 @@ export function saveInventory(items: InventoryItem[]) {
     localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(items));
     window.dispatchEvent(new Event("ss_inventory_updated"));
   } catch {}
+  api.post("/cloud-sync/inventory/batch", items).catch(() => {});
 }
 
 // Orders Management
@@ -273,6 +276,9 @@ export function saveOrders(orders: StoreOrder[]) {
     localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
     window.dispatchEvent(new Event("ss_orders_updated"));
   } catch {}
+  if (orders.length > 0) {
+    api.post("/cloud-sync/orders", orders[0]).catch(() => {});
+  }
 }
 
 // Notifications Management
@@ -426,6 +432,7 @@ export function fulfillPickupOrder(codeOrId: string): StoreOrder | null {
     link: "/supermarket/verification?view=pickups"
   };
   saveNotifications([newNotif, ...notifs]);
+  api.patch(`/cloud-sync/orders/${updated.id}/status?status=FULFILLED`).catch(() => {});
 
   return updated;
 }
@@ -447,6 +454,7 @@ export function cancelPickupOrder(orderId: string): boolean {
     return inv;
   });
   saveInventory(updatedInv);
+  api.patch(`/cloud-sync/orders/${orderId}/status?status=CANCELLED`).catch(() => {});
 
   return true;
 }
@@ -461,3 +469,65 @@ export function clearAllData() {
   window.dispatchEvent(new Event("ss_notifs_updated"));
   window.dispatchEvent(new Event("ss_stores_updated"));
 }
+
+// --- Cloud Sync with MongoDB Atlas via Render Backend ---
+let isSyncing = false;
+export async function syncFromCloud(): Promise<void> {
+  if (isSyncing) return;
+  isSyncing = true;
+  try {
+    const [invRes, storeRes, orderRes] = await Promise.allSettled([
+      api.get<InventoryItem[]>("/cloud-sync/inventory"),
+      api.get<RegisteredStore[]>("/cloud-sync/stores"),
+      api.get<StoreOrder[]>("/cloud-sync/orders")
+    ]);
+
+    if (invRes.status === "fulfilled" && Array.isArray(invRes.value.data)) {
+      const cloudItems = invRes.value.data;
+      if (cloudItems.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(cloudItems));
+        window.dispatchEvent(new Event("ss_inventory_updated"));
+      } else {
+        const local = loadInventory();
+        if (local.length > 0) {
+          api.post("/cloud-sync/inventory/batch", local).catch(() => {});
+        }
+      }
+    }
+
+    if (storeRes.status === "fulfilled" && Array.isArray(storeRes.value.data)) {
+      const cloudStores = storeRes.value.data;
+      if (cloudStores.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.STORES, JSON.stringify(cloudStores));
+        window.dispatchEvent(new Event("ss_stores_updated"));
+      } else {
+        const localStores = loadStores();
+        if (localStores.length > 0) {
+          localStores.forEach(s => api.post("/cloud-sync/stores", s).catch(() => {}));
+        }
+      }
+    }
+
+    if (orderRes.status === "fulfilled" && Array.isArray(orderRes.value.data)) {
+      const cloudOrders = orderRes.value.data;
+      if (cloudOrders.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(cloudOrders));
+        window.dispatchEvent(new Event("ss_orders_updated"));
+      }
+    }
+  } catch {
+    // Cloud sync offline or waking up
+  } finally {
+    isSyncing = false;
+  }
+}
+
+// Auto-sync immediately and poll every 4 seconds so laptop and phone stay in sync
+if (typeof window !== "undefined") {
+  syncFromCloud();
+  setInterval(() => {
+    syncFromCloud();
+  }, 4000);
+  window.addEventListener("focus", () => syncFromCloud());
+}
+
