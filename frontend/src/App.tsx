@@ -18,6 +18,7 @@ import { getMyBatches, createBatch, scanBatch, updateBatchTier } from "@/api/bat
 import { getListings } from "@/api/listings";
 import { getMyOrders, getPendingStoreOrders, reserveListing, fulfillOrderByCode } from "@/api/orders";
 import { getNotifications } from "@/api/notifications";
+import { getMyStore } from "@/api/stores";
 import type { Batch, Listing, Order, NotificationItem, Role } from "@/types";
 
 import {
@@ -25,7 +26,7 @@ import {
   saveNotifications, loadSettings, saveSettings, addReservation,
   fulfillPickupOrder, cancelPickupOrder, loadStores, saveStores, upsertStore,
   calculateDistance, clearAllData, setCurrentUserEmail, isItemForStore, InventoryItem, StoreOrder,
-  AppNotification, UserSettings, RegisteredStore
+  AppNotification, UserSettings, RegisteredStore, DEFAULT_SETTINGS
 } from "@/data/mockStore";
 
 import { SettingsModal } from "@/components/modals/SettingsModal";
@@ -351,34 +352,74 @@ function Login() {
           return;
         }
 
-        // Set the current user email FIRST
-        setCurrentUserEmail(email);
+        // 3. When the logged-in user (email) differs from the one in local settings, discard old local settings.
+        const cleanEmail = email.trim().toLowerCase();
+        const prevSettings = loadSettings();
+        const isDifferentUser = prevSettings.email && prevSettings.email.trim().toLowerCase() !== cleanEmail;
+        const currentSettings = isDifferentUser ? { ...DEFAULT_SETTINGS } : prevSettings;
 
-        const currentSettings = loadSettings();
-        const allStores = loadStores();
+        // Set the current user email
+        setCurrentUserEmail(cleanEmail);
 
-        // Restore user's actual registered store from database
-        const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "").replace("kirna", "kirana");
-        const matchedStore = allStores.find(s =>
-          (registeredUser?.storeId && s.id === registeredUser.storeId) ||
-          (currentSettings.storeId && s.id === currentSettings.storeId) ||
-          (registeredUser?.name && norm(s.managerName || "") === norm(registeredUser.name)) ||
-          (currentSettings.storeName && norm(s.name) === norm(currentSettings.storeName))
-        );
+        let targetStoreId = "";
+        let storeNameVal = "";
+        let storeLocationVal = "";
+        let storeAreaVal = "";
+        let storeCityVal = "";
+        let storePhoneVal = "";
 
-        const targetStoreId = matchedStore?.id || registeredUser?.storeId || currentSettings.storeId || `store_${Date.now()}`;
+        if (role === "supermarket") {
+          // 1. For role supermarket, targetStoreId must be registeredUser.storeId from the login response.
+          // Do NOT prefer a storeId from local settings, and NEVER generate store_${Date.now()} on login.
+          // If the server returns no storeId, show an error ("No store linked to this account").
+          targetStoreId = registeredUser?.storeId?.trim() || "";
+          if (!targetStoreId) {
+            localStorage.removeItem("fr_token");
+            localStorage.removeItem("fr_user");
+            setError("No store linked to this account");
+            setLoading(false);
+            return;
+          }
+
+          // 2. On login, do not overwrite store name/location/area with defaults "My Store", "Market Main Road", "Central Market".
+          // Load the store from GET /stores/my-store and use its values; defaults are only for a first registration.
+          const serverStore = await getMyStore().catch(() => null);
+
+          const allStores = loadStores();
+          const localStore = allStores.find(s => s.id === targetStoreId);
+
+          storeNameVal = serverStore?.name || localStore?.name || (isDifferentUser ? "" : currentSettings.storeName) || "";
+          storeLocationVal = serverStore?.address || localStore?.location || (isDifferentUser ? "" : currentSettings.storeLocation) || "";
+          storeAreaVal = localStore?.area || (isDifferentUser ? "" : currentSettings.storeArea) || "";
+          storeCityVal = localStore?.city || (isDifferentUser ? "" : currentSettings.storeCity) || "";
+          storePhoneVal = serverStore?.phone || localStore?.phone || (isDifferentUser ? "" : currentSettings.storePhone) || "";
+
+          // Sync local store cache with the server source of truth without placeholder defaults
+          if (storeNameVal) {
+            upsertStore({
+              id: targetStoreId,
+              name: storeNameVal,
+              location: storeLocationVal,
+              area: storeAreaVal,
+              city: storeCityVal,
+              phone: storePhoneVal,
+              managerName: registeredUser?.name || currentSettings.name
+            });
+          }
+        }
 
         const loginSettings: UserSettings = {
           ...currentSettings,
           name: registeredUser?.name || currentSettings.name || (role === "supermarket" ? "Store Manager" : "Customer"),
-          email: email.trim().toLowerCase(),
+          email: cleanEmail,
           role,
           ...(role === "supermarket" ? {
             storeId: targetStoreId,
-            storeName: matchedStore?.name || currentSettings.storeName || "My Store",
-            storeLocation: matchedStore?.location || currentSettings.storeLocation || "",
-            storeArea: matchedStore?.area || currentSettings.storeArea || "",
-            storeCity: matchedStore?.city || currentSettings.storeCity || ""
+            storeName: storeNameVal,
+            storeLocation: storeLocationVal,
+            storeArea: storeAreaVal,
+            storeCity: storeCityVal,
+            storePhone: storePhoneVal
           } : {
             userLocation: currentSettings.userLocation || "",
             selectedArea: currentSettings.selectedArea || "",
@@ -387,7 +428,6 @@ function Login() {
         };
 
         saveSettings(loginSettings);
-        // Do NOT call upsertStore on login to preserve actual store address
       }
 
       setLocation(role === "supermarket" ? "/supermarket/overview" : "/ngo/overview");
