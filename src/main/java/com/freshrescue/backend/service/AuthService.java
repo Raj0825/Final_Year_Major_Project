@@ -10,6 +10,7 @@ import com.freshrescue.backend.repository.UserRepository;
 import com.freshrescue.backend.security.JwtService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.mongodb.core.geo.GeoJsonPoint;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -78,10 +79,10 @@ public class AuthService {
 
     public AuthResponse login(LoginRequest req) {
         User user = userRepository.findByEmail(req.email())
-                .orElseThrow(() -> new IllegalArgumentException("Invalid email or password"));
+                .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
 
         if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
-            throw new IllegalArgumentException("Invalid email or password");
+            throw new BadCredentialsException("Invalid email or password");
         }
 
         // If user is STORE_MANAGER but has no storeId in DB, check StoreRepository

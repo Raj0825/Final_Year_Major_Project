@@ -162,6 +162,7 @@ export function setCurrentUserEmail(email: string) {
 // Auto-migrate and clean up obsolete test data and store duplicates
 (() => {
   try {
+    const hasToken = typeof localStorage !== "undefined" && !!localStorage.getItem("fr_token");
     const MIGRATION_KEY = "freshrescue_migration_clean_stores_v3";
     if (!localStorage.getItem(MIGRATION_KEY)) {
       localStorage.setItem(MIGRATION_KEY, "true");
@@ -175,17 +176,17 @@ export function setCurrentUserEmail(email: string) {
             if (!s || !s.name) return false;
             const n = s.name.toLowerCase().trim();
             if (n === "city supermarket") {
-              api.delete(`/cloud-sync/stores/${s.id}`).catch(() => {});
+              if (hasToken) api.delete(`/cloud-sync/stores/${s.id}`).catch(() => {});
               return false;
             }
             if (s.id === "store-default") {
-              api.delete(`/cloud-sync/stores/${s.id}`).catch(() => {});
+              if (hasToken) api.delete(`/cloud-sync/stores/${s.id}`).catch(() => {});
               return false;
             }
             return true;
           });
           localStorage.setItem(STORAGE_KEYS.STORES, JSON.stringify(cleanedStores));
-          api.put("/cloud-sync/stores/sync", cleanedStores).catch(() => {});
+          if (hasToken) api.put("/cloud-sync/stores/sync", cleanedStores).catch(() => {});
         }
       }
 
@@ -197,7 +198,7 @@ export function setCurrentUserEmail(email: string) {
           const cleanedInv = inv.filter(item => {
             if (!item || !item.name) return false;
             if (item.id === "inv-1792928404400" || (item.store && item.store.toLowerCase().includes("city supermarket"))) {
-              api.delete(`/cloud-sync/inventory/${item.id}`).catch(() => {});
+              if (hasToken) api.delete(`/cloud-sync/inventory/${item.id}`).catch(() => {});
               return false;
             }
             return true;
@@ -215,7 +216,7 @@ export function setCurrentUserEmail(email: string) {
             return item;
           });
           localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(cleanedInv));
-          api.put("/cloud-sync/inventory/sync", cleanedInv).catch(() => {});
+          if (hasToken) api.put("/cloud-sync/inventory/sync", cleanedInv).catch(() => {});
         }
       }
       window.dispatchEvent(new Event("ss_stores_updated"));
@@ -283,13 +284,17 @@ export function saveStores(stores: RegisteredStore[]) {
     localStorage.setItem(STORAGE_KEYS.STORES, JSON.stringify(stores));
     window.dispatchEvent(new Event("ss_stores_updated"));
   } catch {}
-  api.put("/cloud-sync/stores/sync", stores).catch(() => {});
+  if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
+    api.put("/cloud-sync/stores/sync", stores).catch(() => {});
+  }
 }
 
 export function deleteStore(id: string) {
   const stores = loadStores().filter(s => s.id !== id);
   saveStores(stores);
-  api.delete(`/cloud-sync/stores/${id}`).catch(() => {});
+  if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
+    api.delete(`/cloud-sync/stores/${id}`).catch(() => {});
+  }
 }
 
 export function upsertStore(data: Partial<RegisteredStore> & { name: string; location: string }): RegisteredStore {
@@ -359,7 +364,9 @@ export function isItemForStore(item: InventoryItem, storeId?: string, storeName?
 export function deleteInventoryItem(id: string) {
   const current = loadInventory().filter(i => i.id !== id);
   saveInventory(current);
-  api.delete(`/cloud-sync/inventory/${id}`).catch(() => {});
+  if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
+    api.delete(`/cloud-sync/inventory/${id}`).catch(() => {});
+  }
 }
 
 // Inventory Management
@@ -382,9 +389,11 @@ export function saveInventory(items: InventoryItem[]) {
     localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(items));
     window.dispatchEvent(new Event("ss_inventory_updated"));
   } catch {}
-  api.put("/cloud-sync/inventory/sync", items).catch(() => {
-    api.post("/cloud-sync/inventory/batch", items).catch(() => {});
-  });
+  if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
+    api.put("/cloud-sync/inventory/sync", items).catch(() => {
+      api.post("/cloud-sync/inventory/batch", items).catch(() => {});
+    });
+  }
 }
 
 // Orders Management
@@ -406,7 +415,7 @@ export function saveOrders(orders: StoreOrder[]) {
     localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
     window.dispatchEvent(new Event("ss_orders_updated"));
   } catch {}
-  if (orders.length > 0) {
+  if (orders.length > 0 && typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
     api.post("/cloud-sync/orders", orders[0]).catch(() => {});
   }
 }
@@ -562,7 +571,9 @@ export function fulfillPickupOrder(codeOrId: string): StoreOrder | null {
     link: "/supermarket/verification?view=pickups"
   };
   saveNotifications([newNotif, ...notifs]);
-  api.patch(`/cloud-sync/orders/${updated.id}/status?status=FULFILLED`).catch(() => {});
+  if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
+    api.patch(`/cloud-sync/orders/${updated.id}/status?status=FULFILLED`).catch(() => {});
+  }
 
   return updated;
 }
@@ -584,7 +595,9 @@ export function cancelPickupOrder(orderId: string): boolean {
     return inv;
   });
   saveInventory(updatedInv);
-  api.patch(`/cloud-sync/orders/${orderId}/status?status=CANCELLED`).catch(() => {});
+  if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
+    api.patch(`/cloud-sync/orders/${orderId}/status?status=CANCELLED`).catch(() => {});
+  }
 
   return true;
 }
@@ -604,6 +617,7 @@ export function clearAllData() {
 let isSyncing = false;
 export async function syncFromCloud(): Promise<void> {
   if (isSyncing) return;
+  if (typeof localStorage === "undefined" || !localStorage.getItem("fr_token")) return;
   isSyncing = true;
   try {
     const [invRes, storeRes, orderRes] = await Promise.allSettled([

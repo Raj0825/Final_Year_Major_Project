@@ -4,6 +4,10 @@ spring:
   data:
     mongodb:
       uri: ${SPRING_DATA_MONGODB_URI:${MONGODB_URI:mongodb://localhost:27017/freshrescue}}
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
 
 server:
   port: ${PORT:8080}

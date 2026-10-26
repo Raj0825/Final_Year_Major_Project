@@ -434,14 +434,16 @@ function Login() {
             <p className="mt-4 max-w-md text-sm text-[#6C655F] leading-relaxed">
               Supermarket managers track inventory decay & fulfill pickups. NGOs and local customers browse discounted food and get instant QR pickup passes.
             </p>
-            <div className="mt-6 flex flex-wrap gap-2">
-              <button onClick={() => handleQuickDemo("supermarket")} className="ss-btn-soft px-3.5 py-2 text-xs">
-                Quick Supermarket Demo
-              </button>
-              <button onClick={() => handleQuickDemo("ngo")} className="ss-btn-soft px-3.5 py-2 text-xs">
-                Quick Customer / NGO Demo
-              </button>
-            </div>
+            {import.meta.env.DEV && (
+              <div className="mt-6 flex flex-wrap gap-2">
+                <button onClick={() => handleQuickDemo("supermarket")} className="ss-btn-soft px-3.5 py-2 text-xs">
+                  Quick Supermarket Demo
+                </button>
+                <button onClick={() => handleQuickDemo("ngo")} className="ss-btn-soft px-3.5 py-2 text-xs">
+                  Quick Customer / NGO Demo
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="ss-card mx-auto w-full max-w-md p-6 sm:p-8">

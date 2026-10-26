@@ -16,7 +16,11 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    const url = err.config?.url || ''
+    const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/signup')
+    const hasToken = typeof localStorage !== 'undefined' && !!localStorage.getItem('fr_token')
+
+    if (err.response?.status === 401 && !isAuthEndpoint && hasToken) {
       localStorage.removeItem('fr_token')
       localStorage.removeItem('fr_user')
       window.location.href = '/login'
