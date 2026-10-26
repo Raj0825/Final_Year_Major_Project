@@ -166,7 +166,6 @@ public class OrderController {
         List<Store> stores = storeRepository.findByManagerId(userId);
         for (Store s : stores) {
             storeIds.add(s.getId());
-            if (s.getName() != null) storeIds.add(s.getName().trim());
         }
         return storeIds;
     }

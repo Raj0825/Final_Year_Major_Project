@@ -4,6 +4,7 @@ spring:
   data:
     mongodb:
       uri: ${SPRING_DATA_MONGODB_URI:${MONGODB_URI:mongodb://localhost:27017/freshrescue}}
+      auto-index-creation: true
   servlet:
     multipart:
       max-file-size: 10MB

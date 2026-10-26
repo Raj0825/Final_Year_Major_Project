@@ -20,8 +20,12 @@ public class BatchService {
     private final BatchStateService batchStateService;
     private final ListingService listingService;
     private final NotificationService notificationService;
+    private final ImageService imageService;
 
     public Batch createBatch(Batch batch) {
+        if (batch.getOriginalPrice() <= 0) {
+            throw new IllegalArgumentException("Original price must be greater than zero: " + batch.getOriginalPrice());
+        }
         if (batch.getState() == null) {
             batch.setState(Batch.BatchState.FRESH);
         }
@@ -63,9 +67,10 @@ public class BatchService {
             batch.setImageUrls(new ArrayList<>());
         }
         if (imageBytes != null && imageBytes.length > 0) {
-            String mime = (filename != null && filename.toLowerCase().endsWith(".png")) ? "image/png" : "image/jpeg";
-            String base64 = java.util.Base64.getEncoder().encodeToString(imageBytes);
-            batch.getImageUrls().add("data:" + mime + ";base64," + base64);
+            String imageId = imageService.storeImage(imageBytes, filename);
+            if (imageId != null) {
+                batch.getImageUrls().add("/api/images/" + imageId);
+            }
         } else if (filename != null && !filename.isBlank()) {
             batch.getImageUrls().add(filename);
         }

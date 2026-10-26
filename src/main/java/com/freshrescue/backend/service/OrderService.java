@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -39,6 +40,10 @@ public class OrderService {
      * Places a reservation against a listing.
      */
     public Order reserve(String listingId, String buyerId, Order.BuyerType buyerType, double quantity) {
+        if (Double.isNaN(quantity) || Double.isInfinite(quantity) || quantity <= 0) {
+            throw new IllegalArgumentException("Quantity must be a positive finite number: " + quantity);
+        }
+
         Query query = Query.query(
                 Criteria.where("id").is(listingId).and("quantityAvailable").gte(quantity)
         );
@@ -93,35 +98,16 @@ public class OrderService {
         return orderRepository.save(order);
     }
 
-    /** Store staff scans the QR or enters Order ID at pickup - finalizes the sale. */
-    public Order fulfill(String orderId, String scannedQrCode, String staffStoreId) {
-        return fulfillByCodeOrId(scannedQrCode != null && !scannedQrCode.isBlank() ? scannedQrCode : orderId, staffStoreId);
-    }
-
     public Order fulfillByCodeOrId(String code, String staffStoreId) {
         if (code == null || code.isBlank()) {
             throw new IllegalArgumentException("QR code or Order ID is required");
         }
         String cleanCode = code.trim();
 
-        // 1. Try finding by exact qrCode, then by order ID
+        // 1. Exact full qrCode or full order ID match only (no endsWith partial match)
         Order order = orderRepository.findByQrCode(cleanCode)
                 .or(() -> orderRepository.findById(cleanCode))
                 .orElse(null);
-
-        // 2. If not found, search among reserved orders for partial match
-        if (order == null) {
-            List<Order> allReserved = orderRepository.findAll().stream()
-                    .filter(o -> o.getStatus() == Order.OrderStatus.RESERVED)
-                    .toList();
-
-            for (Order o : allReserved) {
-                if (o.getId().endsWith(cleanCode) || (o.getQrCode() != null && o.getQrCode().equalsIgnoreCase(cleanCode))) {
-                    order = o;
-                    break;
-                }
-            }
-        }
 
         if (order == null) {
             throw new IllegalArgumentException("No pending reservation found matching code: " + cleanCode);
@@ -131,7 +117,7 @@ public class OrderService {
             throw new AccessDeniedException("No store associated with your account.");
         }
 
-        if (order.getStoreId() != null && !order.getStoreId().equalsIgnoreCase(staffStoreId.trim())) {
+        if (order.getStoreId() == null || !order.getStoreId().equalsIgnoreCase(staffStoreId.trim())) {
             throw new AccessDeniedException("Cannot fulfill orders belonging to another store.");
         }
 
@@ -139,18 +125,40 @@ public class OrderService {
             throw new IllegalStateException("Order is already " + order.getStatus());
         }
 
-        order.setStatus(Order.OrderStatus.FULFILLED);
-        order.setFulfilledAt(Instant.now());
+        if (order.getHoldExpiresAt() != null && order.getHoldExpiresAt().isBefore(Instant.now())) {
+            throw new IllegalStateException("Order hold has expired");
+        }
+
+        // 2. Atomic findAndModify: matches id + status RESERVED + store to prevent concurrent fulfillment
+        Criteria criteria = Criteria.where("id").is(order.getId())
+                .and("status").is(Order.OrderStatus.RESERVED)
+                .and("storeId").is(order.getStoreId());
+
+        Query atomicQuery = Query.query(criteria);
+        Update atomicUpdate = new Update()
+                .set("status", Order.OrderStatus.FULFILLED)
+                .set("fulfilledAt", Instant.now());
+
+        Order fulfilled = mongoTemplate.findAndModify(
+                atomicQuery,
+                atomicUpdate,
+                FindAndModifyOptions.options().returnNew(true),
+                Order.class
+        );
+
+        if (fulfilled == null) {
+            throw new IllegalStateException("Order could not be fulfilled (it may have been fulfilled or expired concurrently)");
+        }
 
         // Deduct fulfilled quantity from parent Batch so store dashboard shows updated stock
-        String targetBatchId = order.getBatchId();
-        if ((targetBatchId == null || targetBatchId.isBlank()) && order.getListingId() != null) {
-            targetBatchId = listingRepository.findById(order.getListingId())
+        String targetBatchId = fulfilled.getBatchId();
+        if ((targetBatchId == null || targetBatchId.isBlank()) && fulfilled.getListingId() != null) {
+            targetBatchId = listingRepository.findById(fulfilled.getListingId())
                     .map(Listing::getBatchId)
                     .orElse(null);
         }
-        if (targetBatchId == null && order.getListingId() != null) {
-            Listing listing = listingRepository.findById(order.getListingId()).orElse(null);
+        if (targetBatchId == null && fulfilled.getListingId() != null) {
+            Listing listing = listingRepository.findById(fulfilled.getListingId()).orElse(null);
             if (listing != null && listing.getStoreId() != null && listing.getProductName() != null) {
                 List<Batch> storeBatches = batchRepository.findByStoreId(listing.getStoreId());
                 for (Batch b : storeBatches) {
@@ -163,9 +171,9 @@ public class OrderService {
         }
 
         if (targetBatchId != null) {
-            order.setBatchId(targetBatchId);
+            fulfilled.setBatchId(targetBatchId);
             final String finalBatchId = targetBatchId;
-            final double orderQuantity = order.getQuantity();
+            final double orderQuantity = fulfilled.getQuantity();
             batchRepository.findById(finalBatchId).ifPresent(batch -> {
                 double oldQuantity = batch.getQuantity();
                 double newQuantity = Math.max(0.0, batch.getQuantity() - orderQuantity);
@@ -181,11 +189,12 @@ public class OrderService {
                 // Sync listing with remaining available stock
                 listingService.syncListingForBatch(updatedBatch);
             });
+            return orderRepository.save(fulfilled);
         } else {
-            log.warn("Could not determine batchId for fulfilled order {}", order.getId());
+            log.warn("Could not determine batchId for fulfilled order {}", fulfilled.getId());
         }
 
-        return orderRepository.save(order);
+        return fulfilled;
     }
 
     /**
@@ -194,16 +203,54 @@ public class OrderService {
      * to the listing so it re-enters the feed.
      */
     public void expireReservation(Order order) {
-        order.setStatus(Order.OrderStatus.EXPIRED_HOLD);
-        orderRepository.save(order);
+        if (order == null || order.getId() == null) return;
 
-        Query query = Query.query(Criteria.where("id").is(order.getListingId()));
-        Update update = new Update().inc("quantityAvailable", order.getQuantity());
-        mongoTemplate.updateFirst(query, update, Listing.class);
+        // Atomic status change: match id + status RESERVED
+        Query atomicQuery = Query.query(
+                Criteria.where("id").is(order.getId()).and("status").is(Order.OrderStatus.RESERVED)
+        );
+        Update atomicUpdate = new Update().set("status", Order.OrderStatus.EXPIRED_HOLD);
 
-        Query batchQuery = Query.query(Criteria.where("id").is(order.getBatchId()));
-        Update batchUpdate = new Update().inc("quantityReserved", -order.getQuantity());
-        mongoTemplate.updateFirst(batchQuery, batchUpdate, com.freshrescue.backend.entity.Batch.class);
+        Order matchedOrder = mongoTemplate.findAndModify(
+                atomicQuery,
+                atomicUpdate,
+                FindAndModifyOptions.options().returnNew(true),
+                Order.class
+        );
+
+        // Release listing and batch stock ONLY if that update matched an order
+        if (matchedOrder == null) {
+            log.info("Reservation {} was already updated/fulfilled/expired, skipping stock release", order.getId());
+            return;
+        }
+
+        // Release stock on listing
+        if (matchedOrder.getListingId() != null) {
+            Query query = Query.query(Criteria.where("id").is(matchedOrder.getListingId()));
+            Update update = new Update().inc("quantityAvailable", matchedOrder.getQuantity());
+            mongoTemplate.updateFirst(query, update, Listing.class);
+        }
+
+        // Release reserved stock on batch and re-sync listing
+        String batchId = matchedOrder.getBatchId();
+        if ((batchId == null || batchId.isBlank()) && matchedOrder.getListingId() != null) {
+            batchId = listingRepository.findById(matchedOrder.getListingId())
+                    .map(Listing::getBatchId)
+                    .orElse(null);
+        }
+
+        if (batchId != null && !batchId.isBlank()) {
+            Query batchQuery = Query.query(Criteria.where("id").is(batchId));
+            Update batchUpdate = new Update().inc("quantityReserved", -matchedOrder.getQuantity());
+            mongoTemplate.updateFirst(batchQuery, batchUpdate, com.freshrescue.backend.entity.Batch.class);
+            batchRepository.findById(batchId).ifPresent(listingService::syncListingForBatch);
+        } else if (matchedOrder.getListingId() != null) {
+            listingRepository.findById(matchedOrder.getListingId()).ifPresent(l -> {
+                if (l.getBatchId() != null) {
+                    batchRepository.findById(l.getBatchId()).ifPresent(listingService::syncListingForBatch);
+                }
+            });
+        }
     }
 
     public List<Order> findExpiredHolds(Instant cutoff) {

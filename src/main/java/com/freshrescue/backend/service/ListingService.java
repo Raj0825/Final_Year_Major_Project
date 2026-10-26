@@ -8,6 +8,7 @@ import com.freshrescue.backend.repository.ListingRepository;
 import com.freshrescue.backend.repository.StoreRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.geo.GeoResults;
@@ -28,6 +29,15 @@ public class ListingService {
     private final BatchRepository batchRepository;
     private final StoreRepository storeRepository;
     private final MongoTemplate mongoTemplate;
+
+    @Value("${freshness.discount.tier1-percent:20}")
+    private int tier1Percent;
+
+    @Value("${freshness.discount.tier2-percent:40}")
+    private int tier2Percent;
+
+    @Value("${freshness.discount.tier3-percent:60}")
+    private int tier3Percent;
 
     /**
      * Keeps the buyer-facing Listing in sync with its parent Batch's state.
@@ -51,11 +61,11 @@ public class ListingService {
         if (batch.getCurrentDiscountPercent() != null && batch.getCurrentDiscountPercent() > 0) {
             discountPercent = batch.getCurrentDiscountPercent();
         } else if (batch.getState() == Batch.BatchState.TIER_1) {
-            discountPercent = 20;
+            discountPercent = tier1Percent;
         } else if (batch.getState() == Batch.BatchState.TIER_2) {
-            discountPercent = 40;
+            discountPercent = tier2Percent;
         } else if (batch.getState() == Batch.BatchState.TIER_3) {
-            discountPercent = 60;
+            discountPercent = tier3Percent;
         }
 
         // Resolve store name and location
@@ -87,7 +97,7 @@ public class ListingService {
             listing.setStoreLocation(storeLocation);
         }
         if (batch.getImageUrls() != null && !batch.getImageUrls().isEmpty()) {
-            listing.setImageUrl(batch.getImageUrls().get(0));
+            listing.setImageUrl(batch.getImageUrls().get(batch.getImageUrls().size() - 1));
         }
 
         listing.setDiscountPercent(discountPercent);
@@ -96,7 +106,7 @@ public class ListingService {
         listing.setUrgent(batch.getState() == Batch.BatchState.TIER_3);
         listing.setUpdatedAt(Instant.now());
 
-        double original = batch.getOriginalPrice() > 0 ? batch.getOriginalPrice() : 50.0;
+        double original = batch.getOriginalPrice();
         listing.setOriginalPrice(original);
         listing.setCurrentPrice(Math.round(original * (1 - discountPercent / 100.0) * 100.0) / 100.0);
 

@@ -26,8 +26,9 @@ public class AuthService {
     private final JwtService jwtService;
 
     public AuthResponse signup(SignupRequest req) {
-        if (userRepository.existsByEmail(req.email())) {
-            throw new IllegalArgumentException("Email already registered: " + req.email());
+        String cleanEmail = req.email() != null ? req.email().trim().toLowerCase() : "";
+        if (userRepository.existsByEmail(cleanEmail)) {
+            throw new IllegalArgumentException("Email already registered: " + cleanEmail);
         }
 
         if (req.storeId() != null && !req.storeId().isBlank()) {
@@ -40,7 +41,7 @@ public class AuthService {
 
         User user = User.builder()
                 .name(req.name())
-                .email(req.email())
+                .email(cleanEmail)
                 .passwordHash(passwordEncoder.encode(req.password()))
                 .role(req.role())
                 .build();
@@ -78,7 +79,8 @@ public class AuthService {
     }
 
     public AuthResponse login(LoginRequest req) {
-        User user = userRepository.findByEmail(req.email())
+        String cleanEmail = req.email() != null ? req.email().trim().toLowerCase() : "";
+        User user = userRepository.findByEmail(cleanEmail)
                 .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
 
         if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {

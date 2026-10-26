@@ -15,7 +15,14 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
+import org.springframework.beans.factory.annotation.Value;
+
 import java.io.IOException;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -30,6 +37,25 @@ public class BatchController {
     private final UserRepository userRepository;
     private final StoreRepository storeRepository;
     private final ListingService listingService;
+
+    @Value("${freshness.discount.tier1-percent:20}")
+    private int tier1Discount;
+
+    @Value("${freshness.discount.tier2-percent:40}")
+    private int tier2Discount;
+
+    @Value("${freshness.discount.tier3-percent:60}")
+    private int tier3Discount;
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CreateBatchRequest(
+            @NotBlank(message = "Product name is required") String productName,
+            @NotBlank(message = "Category is required") String category,
+            @Positive(message = "Quantity must be greater than zero") double quantity,
+            @NotBlank(message = "Unit is required") String unit,
+            @Positive(message = "Original price must be greater than zero") double originalPrice,
+            Instant stockedAt
+    ) {}
 
     public record UpdateTierRequest(Batch.BatchState state, Integer discountPercent) {}
 
@@ -56,9 +82,6 @@ public class BatchController {
         List<Store> stores = storeRepository.findByManagerId(userId);
         for (Store s : stores) {
             authorizedStoreIds.add(s.getId());
-            if (s.getName() != null && !s.getName().isBlank()) {
-                authorizedStoreIds.add(s.getName().trim());
-            }
         }
 
         if (authorizedStoreIds.isEmpty()) {
@@ -67,11 +90,14 @@ public class BatchController {
 
         if (requestStoreId != null && !requestStoreId.isBlank()) {
             String cleanId = requestStoreId.trim();
-            boolean match = authorizedStoreIds.stream().anyMatch(id -> id.equalsIgnoreCase(cleanId));
-            if (!match) {
+            String matched = authorizedStoreIds.stream()
+                    .filter(id -> id.equalsIgnoreCase(cleanId))
+                    .findFirst()
+                    .orElse(null);
+            if (matched == null) {
                 throw new AccessDeniedException("You do not have access to store: " + cleanId);
             }
-            return cleanId;
+            return matched;
         }
 
         // Return primary authorized store ID
@@ -82,14 +108,22 @@ public class BatchController {
 
     @PostMapping
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
-    public Batch createBatch(@RequestBody Batch batch, Authentication auth) {
+    public Batch createBatch(@Valid @RequestBody CreateBatchRequest req, Authentication auth) {
         String userId = auth.getName();
-        String verifiedStoreId = resolveAndVerifyStore(auth, batch.getStoreId());
-        batch.setStoreId(verifiedStoreId);
-        batch.setManagerId(userId);
-        Batch created = batchService.createBatch(batch);
-        listingService.syncListingForBatch(created);
-        return created;
+        String verifiedStoreId = resolveAndVerifyStore(auth, null);
+        Batch batch = Batch.builder()
+                .storeId(verifiedStoreId)
+                .managerId(userId)
+                .productName(req.productName().trim())
+                .category(req.category().trim())
+                .quantity(req.quantity())
+                .unit(req.unit().trim())
+                .originalPrice(req.originalPrice())
+                .stockedAt(req.stockedAt() != null ? req.stockedAt() : Instant.now())
+                .state(Batch.BatchState.FRESH)
+                .quantityReserved(0.0)
+                .build();
+        return batchService.createBatch(batch);
     }
 
     @GetMapping("/my-batches")
@@ -104,7 +138,6 @@ public class BatchController {
         List<Store> stores = storeRepository.findByManagerId(userId);
         for (Store s : stores) {
             myStoreIds.add(s.getId());
-            if (s.getName() != null) myStoreIds.add(s.getName());
         }
 
         List<Batch> all = batchRepository.findAll();
@@ -143,13 +176,16 @@ public class BatchController {
             batch.setState(req.state());
         }
         if (req.discountPercent() != null) {
+            if (req.discountPercent() < 0 || req.discountPercent() > 100) {
+                throw new IllegalArgumentException("discountPercent must be between 0 and 100");
+            }
             batch.setCurrentDiscountPercent(req.discountPercent());
         } else if (req.state() == Batch.BatchState.TIER_1) {
-            batch.setCurrentDiscountPercent(20);
+            batch.setCurrentDiscountPercent(tier1Discount);
         } else if (req.state() == Batch.BatchState.TIER_2) {
-            batch.setCurrentDiscountPercent(40);
+            batch.setCurrentDiscountPercent(tier2Discount);
         } else if (req.state() == Batch.BatchState.TIER_3) {
-            batch.setCurrentDiscountPercent(60);
+            batch.setCurrentDiscountPercent(tier3Discount);
         } else if (req.state() == Batch.BatchState.FRESH) {
             batch.setCurrentDiscountPercent(0);
         }
@@ -162,7 +198,8 @@ public class BatchController {
     @PostMapping("/sync-listings")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public List<Batch> syncAllListings(Authentication auth) {
-        List<Batch> batches = batchRepository.findAll();
+        String verifiedStoreId = resolveAndVerifyStore(auth, null);
+        List<Batch> batches = batchRepository.findByStoreId(verifiedStoreId);
         for (Batch b : batches) {
             listingService.syncListingForBatch(b);
         }
