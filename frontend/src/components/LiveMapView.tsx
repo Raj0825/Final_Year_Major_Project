@@ -53,7 +53,12 @@ export default function LiveMapView() {
   }, []);
 
   const storePins = stores.map(store => {
-    const items = inventory.filter(i => i.storeId === store.id || i.store === store.name);
+    const items = inventory.filter(i => {
+      if (i.store && store.name) {
+        return i.store.trim().toLowerCase() === store.name.trim().toLowerCase();
+      }
+      return Boolean(i.storeId && store.id && i.storeId === store.id);
+    });
     const urgentCount = items.filter(i => i.expiryHoursLeft <= 24 || i.status === 'Expiring soon').length;
     const centre = userPos || DC;
     const coords = deterministicCoords(store.id + store.name, centre.lat, centre.lng);

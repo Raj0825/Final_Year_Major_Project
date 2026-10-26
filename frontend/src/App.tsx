@@ -24,7 +24,7 @@ import {
   loadInventory, saveInventory, loadOrders, saveOrders, loadNotifications,
   saveNotifications, loadSettings, saveSettings, addReservation,
   fulfillPickupOrder, cancelPickupOrder, loadStores, saveStores, upsertStore,
-  calculateDistance, clearAllData, setCurrentUserEmail, InventoryItem, StoreOrder,
+  calculateDistance, clearAllData, setCurrentUserEmail, isItemForStore, InventoryItem, StoreOrder,
   AppNotification, UserSettings, RegisteredStore
 } from "@/data/mockStore";
 
@@ -320,13 +320,21 @@ function Login() {
 
       // Synchronize User and Store Settings
       const currentSettings = loadSettings();
+      let targetStoreId = currentSettings.storeId;
+      if (role === "supermarket") {
+        if (!targetStoreId || targetStoreId === "store-default") {
+          targetStoreId = registeredUser?.storeId || `store_${Date.now()}`;
+        }
+      }
+
       const nextSettings: UserSettings = {
         ...currentSettings,
         name: name || registeredUser?.name || currentSettings.name || (role === "supermarket" ? "Store Manager" : "Customer"),
         email: email || registeredUser?.email || currentSettings.email,
         role,
         ...(role === "supermarket" ? {
-          storeName: storeName.trim() || currentSettings.storeName || "City Supermarket",
+          storeId: targetStoreId,
+          storeName: storeName.trim() || currentSettings.storeName || "My Store",
           storeLocation: storeLocation.trim() || currentSettings.storeLocation || "Market Main Road",
           storeArea: storeArea.trim() || currentSettings.storeArea || "Central Market",
           storeCity: city.trim() || currentSettings.storeCity || ""
@@ -340,7 +348,7 @@ function Login() {
 
       if (role === "supermarket") {
         upsertStore({
-          id: nextSettings.storeId,
+          id: targetStoreId,
           name: nextSettings.storeName,
           location: nextSettings.storeLocation,
           area: nextSettings.storeArea,
@@ -737,23 +745,32 @@ function DashboardHome({ onAction }: { onAction: (message: string) => void }) {
   const [orders, setOrders] = useState<StoreOrder[]>(loadOrders);
   const [selectedOrder, setSelectedOrder] = useState<StoreOrder | null>(null);
   const [activeActivity, setActiveActivity] = useState<{ title: string; desc: string; time: string } | null>(null);
+  const [settings, setSettings] = useState<UserSettings>(loadSettings);
 
   useEffect(() => {
     const handleUpdate = () => {
       setInventory(loadInventory());
       setOrders(loadOrders());
+      setSettings(loadSettings());
     };
     window.addEventListener("ss_inventory_updated", handleUpdate);
     window.addEventListener("ss_orders_updated", handleUpdate);
+    window.addEventListener("ss_settings_updated", handleUpdate);
     return () => {
       window.removeEventListener("ss_inventory_updated", handleUpdate);
       window.removeEventListener("ss_orders_updated", handleUpdate);
+      window.removeEventListener("ss_settings_updated", handleUpdate);
     };
   }, []);
 
-  const urgentItems = inventory.filter(i => i.status === "Expiring soon" || i.flagged || i.expiryHoursLeft <= 6);
-  const pendingOrders = orders.filter(o => o.status === "RESERVED");
-  const totalReservedKg = orders.filter(o => o.status === "RESERVED").reduce((acc, o) => acc + o.quantity, 0);
+  const myInventory = inventory.filter(i => isItemForStore(i, settings.storeId, settings.storeName));
+  const urgentItems = myInventory.filter(i => i.status === "Expiring soon" || i.flagged || i.expiryHoursLeft <= 6);
+  const myOrders = orders.filter(o =>
+    (settings.storeName && o.storeName && o.storeName.trim().toLowerCase() === settings.storeName.trim().toLowerCase()) ||
+    !o.storeName
+  );
+  const pendingOrders = myOrders.filter(o => o.status === "RESERVED");
+  const totalReservedKg = pendingOrders.reduce((acc, o) => acc + o.quantity, 0);
 
   const handleQuickDiscount = (item: InventoryItem, discountPct: number) => {
     const updated = inventory.map(i => {
@@ -1102,6 +1119,7 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
     const d = new Date(); d.setDate(d.getDate() + 2);
     return d.toISOString().split("T")[0];
   });
+  const [settings, setSettings] = useState<UserSettings>(loadSettings);
   const [newStoreCity, setNewStoreCity] = useState(() => loadSettings().storeCity || "");
   const [loading, setLoading] = useState(false);
 
@@ -1109,6 +1127,7 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
     const handleUpdate = () => {
       setInventory(loadInventory());
       const s = loadSettings();
+      setSettings(s);
       if (s.storeCity) setNewStoreCity(s.storeCity);
     };
     window.addEventListener("ss_inventory_updated", handleUpdate);
@@ -1123,16 +1142,20 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
     e.preventDefault();
     setLoading(true);
     try {
-      const settings = loadSettings();
-      const currentStoreName = settings.storeName?.trim() || "My Supermarket";
-      const currentStoreLocation = settings.storeLocation?.trim() || "Market Main Branch";
-      const currentStoreArea = settings.storeArea?.trim() || "Central Market";
-      const effectiveCity = newStoreCity.trim() || settings.storeCity?.trim() || "";
+      const currentSettings = loadSettings();
+      const currentStoreName = currentSettings.storeName?.trim() || "My Supermarket";
+      const currentStoreLocation = currentSettings.storeLocation?.trim() || "Market Main Branch";
+      const currentStoreArea = currentSettings.storeArea?.trim() || "Central Market";
+      const currentStoreId = (currentSettings.storeId && currentSettings.storeId !== "store-default")
+        ? currentSettings.storeId
+        : `store_${Date.now()}`;
+      const effectiveCity = newStoreCity.trim() || currentSettings.storeCity?.trim() || "";
       const storeInitials = currentStoreName.substring(0, 2).toUpperCase() || "SM";
 
-      // If user typed city in this form, persist it to store settings as well
-      if (newStoreCity.trim() && newStoreCity.trim() !== settings.storeCity) {
-        saveSettings({ ...settings, storeCity: newStoreCity.trim() });
+      if (!currentSettings.storeId || currentSettings.storeId === "store-default") {
+        saveSettings({ ...currentSettings, storeId: currentStoreId, storeCity: effectiveCity });
+      } else if (newStoreCity.trim() && newStoreCity.trim() !== currentSettings.storeCity) {
+        saveSettings({ ...currentSettings, storeCity: newStoreCity.trim() });
       }
 
       // Calculate expiry hours from selected date
@@ -1168,7 +1191,7 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
         expiryHoursLeft,
         pickupDeadline: new Date(newExpiryDate).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" }) + ", 6:00 PM",
         flagged: expiryHoursLeft <= 24,
-        storeId: settings.storeId || "store-main",
+        storeId: currentStoreId,
         store: currentStoreName,
         storeLocation: currentStoreLocation,
         storeArea: currentStoreArea,
@@ -1179,13 +1202,13 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
       };
 
       upsertStore({
-        id: settings.storeId,
+        id: currentStoreId,
         name: currentStoreName,
         location: currentStoreLocation,
         area: currentStoreArea,
         city: effectiveCity,
-        phone: settings.storePhone,
-        managerName: settings.name
+        phone: currentSettings.storePhone,
+        managerName: currentSettings.name
       });
 
       const updated = [newItem, ...inventory];
@@ -1247,7 +1270,9 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
     onAction(`Applied 50% Emergency Discount to ${item.name}!`);
   };
 
-  const filtered = inventory.filter(item => {
+  const myInventory = inventory.filter(item => isItemForStore(item, settings.storeId, settings.storeName));
+
+  const filtered = myInventory.filter(item => {
     const matchSearch = item.name.toLowerCase().includes(search.toLowerCase()) || item.sku.toLowerCase().includes(search.toLowerCase());
     const matchCat = selectedCategory === "All" || item.category === selectedCategory;
     const matchUrgent = selectedUrgency === "All" ||
@@ -1272,7 +1297,9 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-[#00897B] dark:text-[#2DD4BF]">FRESHMART SUPERMARKET</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-[#00897B] dark:text-[#2DD4BF]">
+            {(settings.storeName || "MY SUPERMARKET").toUpperCase()}
+          </p>
           <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] dark:text-[#F0F4F2] mt-1">Inventory</h1>
           <p className="text-sm text-[#78726B] dark:text-[#A3B2AC] mt-1">Search stock, flag items for attention, and manage dynamic expiry countdowns.</p>
         </div>
@@ -1294,7 +1321,7 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
               : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
           }`}
         >
-          All Inventory ({inventory.length})
+          All Inventory ({myInventory.length})
         </button>
         <button
           onClick={() => { setActiveTab("expiry"); setFlaggedOnly(false); }}
@@ -1304,7 +1331,7 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
               : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
           }`}
         >
-          <CalendarClock className="h-3.5 w-3.5" /> Expiry Watchlist ({inventory.filter(i => i.expiryHoursLeft <= 24).length})
+          <CalendarClock className="h-3.5 w-3.5" /> Expiry Watchlist ({myInventory.filter(i => i.expiryHoursLeft <= 24).length})
         </button>
         <button
           onClick={() => { setActiveTab("flagged"); setFlaggedOnly(true); }}
@@ -1314,7 +1341,7 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
               : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
           }`}
         >
-          <Flag className="h-3.5 w-3.5" /> Flagged for Attention ({inventory.filter(i => i.flagged || i.status === "Expiring soon").length})
+          <Flag className="h-3.5 w-3.5" /> Flagged for Attention ({myInventory.filter(i => i.flagged || i.status === "Expiring soon").length})
         </button>
       </div>
 
@@ -1710,23 +1737,34 @@ function DetectionPage({ onAction }: { onAction: (message: string, kind?: ToastK
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const [settings, setSettings] = useState<UserSettings>(loadSettings);
+
   useEffect(() => {
-    const handleUpdate = () => setInventory(loadInventory());
+    const handleUpdate = () => {
+      setInventory(loadInventory());
+      setSettings(loadSettings());
+    };
     window.addEventListener("ss_inventory_updated", handleUpdate);
-    return () => window.removeEventListener("ss_inventory_updated", handleUpdate);
+    window.addEventListener("ss_settings_updated", handleUpdate);
+    return () => {
+      window.removeEventListener("ss_inventory_updated", handleUpdate);
+      window.removeEventListener("ss_settings_updated", handleUpdate);
+    };
   }, []);
+
+  const myInventory = inventory.filter(i => isItemForStore(i, settings.storeId, settings.storeName));
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const bId = urlParams.get("batchId");
-    if (bId && inventory.some(i => i.id === bId)) {
+    if (bId && myInventory.some(i => i.id === bId)) {
       setSelectedItemId(bId);
-    } else if (inventory.length > 0 && !selectedItemId) {
-      setSelectedItemId(inventory[0].id);
+    } else if (myInventory.length > 0 && !selectedItemId) {
+      setSelectedItemId(myInventory[0].id);
     }
-  }, [inventory]);
+  }, [myInventory]);
 
-  const targetItem = inventory.find(i => i.id === selectedItemId) || inventory[0];
+  const targetItem = myInventory.find(i => i.id === selectedItemId) || myInventory[0];
 
   const presets = [
     {
@@ -2053,16 +2091,21 @@ function SurplusPage({ onAction }: { onAction: (message: string) => void }) {
     };
   }, []);
 
-  // Filter items that qualify as surplus
-  const surplusItems = inventory.filter(i => i.discountPercent > 0 || i.flagged || i.status === "Expiring soon" || i.status === "Reserved");
+  // Filter items that qualify as surplus for this store
+  const myInventory = inventory.filter(i => isItemForStore(i, settings.storeId, settings.storeName));
+  const surplusItems = myInventory.filter(i => i.discountPercent > 0 || i.flagged || i.status === "Expiring soon" || i.status === "Reserved");
 
+  const myOrders = orders.filter(o =>
+    (settings.storeName && o.storeName && o.storeName.trim().toLowerCase() === settings.storeName.trim().toLowerCase()) ||
+    !o.storeName
+  );
   const totalAvailable = surplusItems.reduce((acc, curr) => acc + curr.available, 0);
-  const totalReserved = orders.filter(o => o.status === "RESERVED").reduce((acc, curr) => acc + curr.quantity, 0);
+  const totalReserved = myOrders.filter(o => o.status === "RESERVED").reduce((acc, curr) => acc + curr.quantity, 0);
   const totalRemaining = Math.max(0, totalAvailable - totalReserved);
 
   const displayedItems = surplusItems.filter(item => {
     if (filterMode === "available") return item.available > 0;
-    if (filterMode === "reserved") return orders.some(o => o.productName.toLowerCase() === item.name.toLowerCase() && o.status === "RESERVED");
+    if (filterMode === "reserved") return myOrders.some(o => o.productName.toLowerCase() === item.name.toLowerCase() && o.status === "RESERVED");
     return true;
   });
 
@@ -2258,15 +2301,28 @@ function VerificationPage({ onAction }: { onAction: (message: string, kind?: Toa
   const [selectedReceipt, setSelectedReceipt] = useState<StoreOrder | null>(null);
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState<StoreOrder[]>(loadOrders);
+  const [settings, setSettings] = useState<UserSettings>(loadSettings);
 
   useEffect(() => {
-    const handleUpdate = () => setOrders(loadOrders());
+    const handleUpdate = () => {
+      setOrders(loadOrders());
+      setSettings(loadSettings());
+    };
     window.addEventListener("ss_orders_updated", handleUpdate);
-    return () => window.removeEventListener("ss_orders_updated", handleUpdate);
+    window.addEventListener("ss_settings_updated", handleUpdate);
+    return () => {
+      window.removeEventListener("ss_orders_updated", handleUpdate);
+      window.removeEventListener("ss_settings_updated", handleUpdate);
+    };
   }, []);
 
-  const pendingOrders = orders.filter(o => o.status === "RESERVED");
-  const fulfilledOrders = orders.filter(o => o.status === "FULFILLED");
+  const currentStoreName = (settings.storeName || "").trim().toLowerCase();
+  const myOrders = orders.filter(o =>
+    (currentStoreName && o.storeName && o.storeName.trim().toLowerCase() === currentStoreName) ||
+    !o.storeName
+  );
+  const pendingOrders = myOrders.filter(o => o.status === "RESERVED");
+  const fulfilledOrders = myOrders.filter(o => o.status === "FULFILLED");
 
   const handleVerify = (passCode: string) => {
     const cleanCode = passCode.trim().toUpperCase();

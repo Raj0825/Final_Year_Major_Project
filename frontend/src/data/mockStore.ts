@@ -96,7 +96,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   name: "Store Manager",
   email: "store@freshrescue.org",
   role: "supermarket",
-  storeId: "store-default",
+  storeId: "",
   storeName: "",
   storeLocation: "",
   storeArea: "",
@@ -205,20 +205,25 @@ export function saveStores(stores: RegisteredStore[]) {
 
 export function upsertStore(data: Partial<RegisteredStore> & { name: string; location: string }): RegisteredStore {
   const stores = loadStores();
+  const cleanName = data.name.trim();
   const existingIdx = stores.findIndex(
-    s => (data.id && s.id === data.id) || s.name.toLowerCase() === data.name.toLowerCase()
+    s => s.name.trim().toLowerCase() === cleanName.toLowerCase() ||
+         (data.id && data.id !== "store-default" && s.id === data.id)
   );
 
-  const targetId = data.id || (existingIdx !== -1 ? stores[existingIdx].id : `store-${Date.now()}`);
+  const targetId = existingIdx !== -1
+    ? stores[existingIdx].id
+    : (data.id && data.id !== "store-default" ? data.id : `store-${Date.now()}`);
+
   const updatedRecord: RegisteredStore = {
     id: targetId,
-    name: data.name.trim(),
+    name: cleanName,
     location: data.location.trim(),
     area: data.area ? data.area.trim() : (data.location.split(",")[0] || "Local Area").trim(),
     city: data.city ? data.city.trim() : "",
     phone: data.phone || "",
     managerName: data.managerName || "Store Manager",
-    joinedAt: data.joinedAt || new Date().toISOString()
+    joinedAt: data.joinedAt || (existingIdx !== -1 ? stores[existingIdx].joinedAt : new Date().toISOString())
   };
 
   let nextStores: RegisteredStore[];
@@ -232,6 +237,19 @@ export function upsertStore(data: Partial<RegisteredStore> & { name: string; loc
   saveStores(nextStores);
   api.post("/cloud-sync/stores", updatedRecord).catch(() => {});
   return updatedRecord;
+}
+
+// Helper to determine if an inventory item belongs to a specific store
+export function isItemForStore(item: InventoryItem, storeId?: string, storeName?: string): boolean {
+  if (!item) return false;
+  const sName = (storeName || "").trim().toLowerCase();
+  if (sName && item.store) {
+    return item.store.trim().toLowerCase() === sName;
+  }
+  if (storeId && storeId !== "store-default" && item.storeId) {
+    return item.storeId === storeId;
+  }
+  return false;
 }
 
 // Inventory Management
