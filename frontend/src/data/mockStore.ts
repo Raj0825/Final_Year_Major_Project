@@ -159,6 +159,71 @@ export function setCurrentUserEmail(email: string) {
   } catch {}
 })();
 
+// Auto-migrate and clean up obsolete test data and store duplicates
+(() => {
+  try {
+    const MIGRATION_KEY = "freshrescue_migration_clean_stores_v3";
+    if (!localStorage.getItem(MIGRATION_KEY)) {
+      localStorage.setItem(MIGRATION_KEY, "true");
+
+      // 1. Clean up stores: remove duplicate 'store-default' or 'City Supermarket'
+      const rawStores = localStorage.getItem(STORAGE_KEYS.STORES);
+      if (rawStores) {
+        const stores: RegisteredStore[] = JSON.parse(rawStores);
+        if (Array.isArray(stores)) {
+          const cleanedStores = stores.filter(s => {
+            if (!s || !s.name) return false;
+            const n = s.name.toLowerCase().trim();
+            if (n === "city supermarket") {
+              api.delete(`/cloud-sync/stores/${s.id}`).catch(() => {});
+              return false;
+            }
+            if (s.id === "store-default") {
+              api.delete(`/cloud-sync/stores/${s.id}`).catch(() => {});
+              return false;
+            }
+            return true;
+          });
+          localStorage.setItem(STORAGE_KEYS.STORES, JSON.stringify(cleanedStores));
+          api.put("/cloud-sync/stores/sync", cleanedStores).catch(() => {});
+        }
+      }
+
+      // 2. Clean up inventory: remove test apple from City Supermarket and normalize Banana to Rajesh Kirana store
+      const rawInv = localStorage.getItem(STORAGE_KEYS.INVENTORY);
+      if (rawInv) {
+        const inv: InventoryItem[] = JSON.parse(rawInv);
+        if (Array.isArray(inv)) {
+          const cleanedInv = inv.filter(item => {
+            if (!item || !item.name) return false;
+            if (item.id === "inv-1792928404400" || (item.store && item.store.toLowerCase().includes("city supermarket"))) {
+              api.delete(`/cloud-sync/inventory/${item.id}`).catch(() => {});
+              return false;
+            }
+            return true;
+          }).map(item => {
+            if (item.store && item.store.toLowerCase().includes("rajesh kirna")) {
+              return {
+                ...item,
+                store: "Rajesh Kirana store",
+                storeId: "6adefee06aaf854704c87d53",
+                storeLocation: "near Ashok chowk",
+                storeArea: "ashowk chowk",
+                storeCity: "Solapur"
+              };
+            }
+            return item;
+          });
+          localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(cleanedInv));
+          api.put("/cloud-sync/inventory/sync", cleanedInv).catch(() => {});
+        }
+      }
+      window.dispatchEvent(new Event("ss_stores_updated"));
+      window.dispatchEvent(new Event("ss_inventory_updated"));
+    }
+  } catch {}
+})();
+
 // Distance Calculation Utility
 export function calculateDistance(userLocOrArea: string, storeLocOrArea: string): { km: number; display: string } {
   if (!userLocOrArea || !storeLocOrArea) {
@@ -190,7 +255,24 @@ export function loadStores(): RegisteredStore[] {
     const raw = localStorage.getItem(STORAGE_KEYS.STORES);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        const seen = new Map<string, RegisteredStore>();
+        const normKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "").replace("kirna", "kirana");
+        for (const store of parsed) {
+          if (!store || !store.name) continue;
+          if (store.name.toLowerCase().trim() === "city supermarket") continue;
+          const k = normKey(store.name);
+          if (seen.has(k)) {
+            const ex = seen.get(k)!;
+            if (ex.id === "store-default" && store.id !== "store-default") {
+              seen.set(k, { ...ex, ...store });
+            }
+          } else {
+            seen.set(k, store);
+          }
+        }
+        return Array.from(seen.values());
+      }
     }
   } catch {}
   return [];
@@ -201,28 +283,50 @@ export function saveStores(stores: RegisteredStore[]) {
     localStorage.setItem(STORAGE_KEYS.STORES, JSON.stringify(stores));
     window.dispatchEvent(new Event("ss_stores_updated"));
   } catch {}
+  api.put("/cloud-sync/stores/sync", stores).catch(() => {});
+}
+
+export function deleteStore(id: string) {
+  const stores = loadStores().filter(s => s.id !== id);
+  saveStores(stores);
+  api.delete(`/cloud-sync/stores/${id}`).catch(() => {});
 }
 
 export function upsertStore(data: Partial<RegisteredStore> & { name: string; location: string }): RegisteredStore {
   const stores = loadStores();
-  const cleanName = data.name.trim();
+  const cleanName = data.name ? data.name.trim() : "";
+  if (!cleanName || cleanName === "My Store") {
+    return {
+      id: data.id || "store-temp",
+      name: cleanName || "My Store",
+      location: data.location || "",
+      area: data.area || "",
+      city: data.city || "",
+      phone: data.phone || "",
+      managerName: data.managerName || "",
+      joinedAt: new Date().toISOString()
+    };
+  }
+
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "").replace("kirna", "kirana");
+  const cleanNorm = norm(cleanName);
+
   const existingIdx = stores.findIndex(
-    s => s.name.trim().toLowerCase() === cleanName.toLowerCase() ||
-         (data.id && data.id !== "store-default" && s.id === data.id)
+    s => norm(s.name) === cleanNorm || (data.id && data.id !== "store-default" && s.id === data.id)
   );
 
-  const targetId = existingIdx !== -1
+  const targetId = existingIdx !== -1 && stores[existingIdx].id !== "store-default"
     ? stores[existingIdx].id
     : (data.id && data.id !== "store-default" ? data.id : `store-${Date.now()}`);
 
   const updatedRecord: RegisteredStore = {
     id: targetId,
     name: cleanName,
-    location: data.location.trim(),
-    area: data.area ? data.area.trim() : (data.location.split(",")[0] || "Local Area").trim(),
-    city: data.city ? data.city.trim() : "",
-    phone: data.phone || "",
-    managerName: data.managerName || "Store Manager",
+    location: data.location ? data.location.trim() : (existingIdx !== -1 ? stores[existingIdx].location : ""),
+    area: data.area ? data.area.trim() : (existingIdx !== -1 ? stores[existingIdx].area : "Central Market"),
+    city: data.city ? data.city.trim() : (existingIdx !== -1 ? stores[existingIdx].city : ""),
+    phone: data.phone || (existingIdx !== -1 ? stores[existingIdx].phone : ""),
+    managerName: data.managerName || (existingIdx !== -1 ? stores[existingIdx].managerName : "Store Manager"),
     joinedAt: data.joinedAt || (existingIdx !== -1 ? stores[existingIdx].joinedAt : new Date().toISOString())
   };
 
@@ -235,21 +339,27 @@ export function upsertStore(data: Partial<RegisteredStore> & { name: string; loc
   }
 
   saveStores(nextStores);
-  api.post("/cloud-sync/stores", updatedRecord).catch(() => {});
   return updatedRecord;
 }
 
 // Helper to determine if an inventory item belongs to a specific store
 export function isItemForStore(item: InventoryItem, storeId?: string, storeName?: string): boolean {
   if (!item) return false;
-  const sName = (storeName || "").trim().toLowerCase();
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "").replace("kirna", "kirana");
+  const sName = norm(storeName || "");
   if (sName && item.store) {
-    return item.store.trim().toLowerCase() === sName;
+    return norm(item.store) === sName;
   }
-  if (storeId && storeId !== "store-default" && item.storeId) {
+  if (storeId && storeId !== "store-default" && item.storeId && item.storeId !== "store-default") {
     return item.storeId === storeId;
   }
   return false;
+}
+
+export function deleteInventoryItem(id: string) {
+  const current = loadInventory().filter(i => i.id !== id);
+  saveInventory(current);
+  api.delete(`/cloud-sync/inventory/${id}`).catch(() => {});
 }
 
 // Inventory Management
@@ -272,7 +382,9 @@ export function saveInventory(items: InventoryItem[]) {
     localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(items));
     window.dispatchEvent(new Event("ss_inventory_updated"));
   } catch {}
-  api.post("/cloud-sync/inventory/batch", items).catch(() => {});
+  api.put("/cloud-sync/inventory/sync", items).catch(() => {
+    api.post("/cloud-sync/inventory/batch", items).catch(() => {});
+  });
 }
 
 // Orders Management
@@ -501,29 +613,35 @@ export async function syncFromCloud(): Promise<void> {
     ]);
 
     if (invRes.status === "fulfilled" && Array.isArray(invRes.value.data)) {
-      const cloudItems = invRes.value.data;
-      if (cloudItems.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(cloudItems));
-        window.dispatchEvent(new Event("ss_inventory_updated"));
-      } else {
-        const local = loadInventory();
-        if (local.length > 0) {
-          api.post("/cloud-sync/inventory/batch", local).catch(() => {});
-        }
-      }
+      const cloudItems = invRes.value.data.filter(i => {
+        if (!i || !i.name) return false;
+        if (i.id === "inv-1792928404400" || (i.store && i.store.toLowerCase().includes("city supermarket"))) return false;
+        return true;
+      });
+      localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(cloudItems));
+      window.dispatchEvent(new Event("ss_inventory_updated"));
     }
 
     if (storeRes.status === "fulfilled" && Array.isArray(storeRes.value.data)) {
       const cloudStores = storeRes.value.data;
-      if (cloudStores.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.STORES, JSON.stringify(cloudStores));
-        window.dispatchEvent(new Event("ss_stores_updated"));
-      } else {
-        const localStores = loadStores();
-        if (localStores.length > 0) {
-          localStores.forEach(s => api.post("/cloud-sync/stores", s).catch(() => {}));
+      const seen = new Map<string, RegisteredStore>();
+      const normKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "").replace("kirna", "kirana");
+      for (const store of cloudStores) {
+        if (!store || !store.name) continue;
+        if (store.name.toLowerCase().trim() === "city supermarket") continue;
+        const k = normKey(store.name);
+        if (seen.has(k)) {
+          const ex = seen.get(k)!;
+          if (ex.id === "store-default" && store.id !== "store-default") {
+            seen.set(k, { ...ex, ...store });
+          }
+        } else {
+          seen.set(k, store);
         }
       }
+      const cleaned = Array.from(seen.values());
+      localStorage.setItem(STORAGE_KEYS.STORES, JSON.stringify(cleaned));
+      window.dispatchEvent(new Event("ss_stores_updated"));
     }
 
     if (orderRes.status === "fulfilled" && Array.isArray(orderRes.value.data)) {

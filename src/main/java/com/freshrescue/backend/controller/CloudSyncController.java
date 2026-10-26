@@ -52,6 +52,12 @@ public class CloudSyncController {
         return inventoryRepo.saveAll(items);
     }
 
+    @PutMapping("/inventory/sync")
+    public List<CloudInventoryItem> syncAllInventory(@RequestBody List<CloudInventoryItem> items) {
+        inventoryRepo.deleteAll();
+        return inventoryRepo.saveAll(items);
+    }
+
     @DeleteMapping("/inventory/{id}")
     public ResponseEntity<Void> deleteInventoryItem(@PathVariable String id) {
         inventoryRepo.deleteById(id);
@@ -70,6 +76,18 @@ public class CloudSyncController {
             store.setId("store-" + System.currentTimeMillis());
         }
         return storeRepo.save(store);
+    }
+
+    @PutMapping("/stores/sync")
+    public List<CloudStore> syncAllStores(@RequestBody List<CloudStore> stores) {
+        storeRepo.deleteAll();
+        return storeRepo.saveAll(stores);
+    }
+
+    @DeleteMapping("/stores/{id}")
+    public ResponseEntity<Void> deleteStore(@PathVariable String id) {
+        storeRepo.deleteById(id);
+        return ResponseEntity.noContent().build();
     }
 
     // --- Orders Sync ---

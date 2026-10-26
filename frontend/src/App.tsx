@@ -291,6 +291,8 @@ function Login() {
             password,
             name: name || (role === "supermarket" ? "Store Manager" : "Customer"),
             role: backendRole,
+            storeName: role === "supermarket" ? storeName.trim() : undefined,
+            storeAddress: role === "supermarket" ? storeLocation.trim() : undefined,
           });
           registeredUser = res;
           localStorage.setItem("fr_token", res.token);
@@ -301,7 +303,42 @@ function Login() {
           setLoading(false);
           return;
         }
+
+        // Set the current user email FIRST
+        setCurrentUserEmail(email);
+
+        const targetStoreId = registeredUser?.storeId || `store_${Date.now()}`;
+        const newSettings: UserSettings = {
+          ...loadSettings(),
+          name: name.trim() || (role === "supermarket" ? "Store Manager" : "Customer"),
+          email: email.trim().toLowerCase(),
+          role,
+          ...(role === "supermarket" ? {
+            storeId: targetStoreId,
+            storeName: storeName.trim() || "My Store",
+            storeLocation: storeLocation.trim(),
+            storeArea: storeArea.trim() || (storeLocation.split(",")[0] || "Central Market").trim(),
+            storeCity: city.trim()
+          } : {
+            userLocation: userLocation.trim() || "Home Address",
+            selectedArea: selectedArea.trim() || (userLocation.split(",")[0] || "Central Market").trim(),
+            userCity: city.trim()
+          })
+        };
+        saveSettings(newSettings);
+
+        if (role === "supermarket") {
+          upsertStore({
+            id: targetStoreId,
+            name: newSettings.storeName,
+            location: newSettings.storeLocation,
+            area: newSettings.storeArea,
+            city: newSettings.storeCity,
+            managerName: newSettings.name
+          });
+        }
       } else {
+        // --- LOGIN FLOW ---
         try {
           const res = await apiLogin({ email, password });
           registeredUser = res;
@@ -313,48 +350,44 @@ function Login() {
           setLoading(false);
           return;
         }
-      }
 
-      // Set the current user email FIRST so saveSettings writes to the right per-user key
-      setCurrentUserEmail(email);
+        // Set the current user email FIRST
+        setCurrentUserEmail(email);
 
-      // Synchronize User and Store Settings
-      const currentSettings = loadSettings();
-      let targetStoreId = currentSettings.storeId;
-      if (role === "supermarket") {
-        if (!targetStoreId || targetStoreId === "store-default") {
-          targetStoreId = registeredUser?.storeId || `store_${Date.now()}`;
-        }
-      }
+        const currentSettings = loadSettings();
+        const allStores = loadStores();
 
-      const nextSettings: UserSettings = {
-        ...currentSettings,
-        name: name || registeredUser?.name || currentSettings.name || (role === "supermarket" ? "Store Manager" : "Customer"),
-        email: email || registeredUser?.email || currentSettings.email,
-        role,
-        ...(role === "supermarket" ? {
-          storeId: targetStoreId,
-          storeName: storeName.trim() || currentSettings.storeName || "My Store",
-          storeLocation: storeLocation.trim() || currentSettings.storeLocation || "Market Main Road",
-          storeArea: storeArea.trim() || currentSettings.storeArea || "Central Market",
-          storeCity: city.trim() || currentSettings.storeCity || ""
-        } : {
-          userLocation: userLocation.trim() || currentSettings.userLocation || "Home Address",
-          selectedArea: selectedArea.trim() || currentSettings.selectedArea || "Central Market",
-          userCity: city.trim() || currentSettings.userCity || ""
-        })
-      };
-      saveSettings(nextSettings);
+        // Restore user's actual registered store from database
+        const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "").replace("kirna", "kirana");
+        const matchedStore = allStores.find(s =>
+          (registeredUser?.storeId && s.id === registeredUser.storeId) ||
+          (currentSettings.storeId && s.id === currentSettings.storeId) ||
+          (registeredUser?.name && norm(s.managerName || "") === norm(registeredUser.name)) ||
+          (currentSettings.storeName && norm(s.name) === norm(currentSettings.storeName))
+        );
 
-      if (role === "supermarket") {
-        upsertStore({
-          id: targetStoreId,
-          name: nextSettings.storeName,
-          location: nextSettings.storeLocation,
-          area: nextSettings.storeArea,
-          city: nextSettings.storeCity,
-          managerName: nextSettings.name
-        });
+        const targetStoreId = matchedStore?.id || registeredUser?.storeId || currentSettings.storeId || `store_${Date.now()}`;
+
+        const loginSettings: UserSettings = {
+          ...currentSettings,
+          name: registeredUser?.name || currentSettings.name || (role === "supermarket" ? "Store Manager" : "Customer"),
+          email: email.trim().toLowerCase(),
+          role,
+          ...(role === "supermarket" ? {
+            storeId: targetStoreId,
+            storeName: matchedStore?.name || currentSettings.storeName || "My Store",
+            storeLocation: matchedStore?.location || currentSettings.storeLocation || "",
+            storeArea: matchedStore?.area || currentSettings.storeArea || "",
+            storeCity: matchedStore?.city || currentSettings.storeCity || ""
+          } : {
+            userLocation: currentSettings.userLocation || "",
+            selectedArea: currentSettings.selectedArea || "",
+            userCity: currentSettings.userCity || ""
+          })
+        };
+
+        saveSettings(loginSettings);
+        // Do NOT call upsertStore on login to preserve actual store address
       }
 
       setLocation(role === "supermarket" ? "/supermarket/overview" : "/ngo/overview");
@@ -3127,35 +3160,33 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
     return true;
   });
 
-  // City-filtered stores list
-  const cityFilteredStores = stores.filter(s => isSameCity(s.city, s.name));
+  // Helper to normalize store names for grouping and filtering
+  const normStore = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "").replace("kirna", "kirana");
 
-  // Build list of distinct supermarkets (only city-matched)
+  // Build list of distinct supermarkets (only stores that have surplus food in user's city)
   const distinctStoreMap = new Map<string, { name: string; location: string; city: string; distance: string }>();
-  cityFilteredStores.forEach(s => {
-    distinctStoreMap.set(s.name.toLowerCase(), {
-      name: s.name,
-      location: s.location,
-      city: s.city || "",
-      distance: calculateDistance(settings.userLocation || settings.selectedArea, s.location || s.area).display
-    });
-  });
+
+  // Add stores that currently have available inventory
   cityFilteredInventory.forEach(i => {
-    if (!distinctStoreMap.has(i.store.toLowerCase())) {
-      distinctStoreMap.set(i.store.toLowerCase(), {
-        name: i.store,
-        location: i.storeLocation || "Market Area",
-        city: i.storeCity || "",
-        distance: calculateDistance(settings.userLocation || settings.selectedArea, i.storeLocation || i.store).display
+    if (!i.store) return;
+    const k = normStore(i.store);
+    if (!distinctStoreMap.has(k)) {
+      const matched = stores.find(s => normStore(s.name) === k);
+      distinctStoreMap.set(k, {
+        name: matched?.name || i.store,
+        location: matched?.location || i.storeLocation || "Market Area",
+        city: matched?.city || i.storeCity || "",
+        distance: calculateDistance(settings.userLocation || settings.selectedArea, matched?.location || i.storeLocation || i.store).display
       });
     }
   });
+
   const distinctStores = Array.from(distinctStoreMap.values());
 
   const filtered = cityFilteredInventory.filter(item => {
     const matchCategory = selectedCategory === "All" || item.category.toLowerCase() === selectedCategory.toLowerCase();
-    const matchStore = selectedStore === "All" || item.store.toLowerCase() === selectedStore.toLowerCase();
-    const matchFav = !favoritesOnly || favorites.includes(item.store);
+    const matchStore = selectedStore === "All" || normStore(item.store) === normStore(selectedStore);
+    const matchFav = !favoritesOnly || favorites.some(fav => normStore(fav) === normStore(item.store));
     const matchQuery = !query.trim() ||
                        item.name.toLowerCase().includes(query.toLowerCase()) ||
                        item.store.toLowerCase().includes(query.toLowerCase()) ||
@@ -3317,9 +3348,9 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
             All Stores ({cityFilteredInventory.length})
           </button>
           {distinctStores.map(s => {
-            const isSelected = selectedStore.toLowerCase() === s.name.toLowerCase();
-            const count = cityFilteredInventory.filter(i => i.store.toLowerCase() === s.name.toLowerCase()).length;
-            const isFav = favorites.includes(s.name);
+            const isSelected = normStore(selectedStore) === normStore(s.name);
+            const count = cityFilteredInventory.filter(i => normStore(i.store) === normStore(s.name)).length;
+            const isFav = favorites.some(fav => normStore(fav) === normStore(s.name));
             return (
               <div
                 key={s.name}

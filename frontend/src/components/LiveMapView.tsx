@@ -52,10 +52,11 @@ export default function LiveMapView() {
     };
   }, []);
 
+  const norm = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace('kirna', 'kirana');
   const storePins = stores.map(store => {
     const items = inventory.filter(i => {
       if (i.store && store.name) {
-        return i.store.trim().toLowerCase() === store.name.trim().toLowerCase();
+        return norm(i.store) === norm(store.name);
       }
       return Boolean(i.storeId && store.id && i.storeId === store.id);
     });
