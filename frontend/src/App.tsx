@@ -400,16 +400,15 @@ function Login() {
 
   const handleQuickDemo = (demoRole: AppWorkspaceRole) => {
     setRole(demoRole);
+    setPassword("");
     if (demoRole === "supermarket") {
       setEmail("store@example.com");
-      setPassword("password123");
       setName("Rajesh Patel");
       setStoreName("Apex Fresh Supermarket");
       setStoreLocation("Shop 10-12, Station Road, Central");
       setStoreArea("Central Market");
     } else {
       setEmail("customer@example.com");
-      setPassword("password123");
       setName("Priya Sharma");
       setUserLocation("Flat 302, Green Enclave, Station Road");
       setSelectedArea("Central Market");

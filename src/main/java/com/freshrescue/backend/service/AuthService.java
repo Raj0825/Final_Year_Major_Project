@@ -29,12 +29,19 @@ public class AuthService {
             throw new IllegalArgumentException("Email already registered: " + req.email());
         }
 
+        if (req.storeId() != null && !req.storeId().isBlank()) {
+            throw new IllegalArgumentException("Choosing a storeId during registration is not permitted");
+        }
+
+        if (req.role() == User.Role.STORE_STAFF) {
+            throw new IllegalArgumentException("STORE_STAFF cannot be registered via public signup");
+        }
+
         User user = User.builder()
                 .name(req.name())
                 .email(req.email())
                 .passwordHash(passwordEncoder.encode(req.password()))
                 .role(req.role())
-                .storeId(req.storeId())
                 .build();
 
         User saved = userRepository.save(user);

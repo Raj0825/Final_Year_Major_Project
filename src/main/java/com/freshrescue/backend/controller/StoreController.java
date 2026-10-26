@@ -5,6 +5,7 @@ import com.freshrescue.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.mongodb.core.geo.GeoJsonPoint;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -173,6 +174,25 @@ public class StoreController {
         }
 
         final String finalStoreId = storeId;
+
+        // Verify caller has access to this store
+        String userId = auth.getName();
+        String staffStoreId = (String) auth.getDetails();
+        boolean authorized = (staffStoreId != null && staffStoreId.equalsIgnoreCase(finalStoreId));
+        if (!authorized) {
+            User user = userRepository.findById(userId).orElse(null);
+            if (user != null && user.getStoreId() != null && user.getStoreId().equalsIgnoreCase(finalStoreId)) {
+                authorized = true;
+            }
+        }
+        if (!authorized) {
+            authorized = storeRepository.findByManagerId(userId).stream()
+                    .anyMatch(s -> s.getId().equalsIgnoreCase(finalStoreId) || (s.getName() != null && s.getName().equalsIgnoreCase(finalStoreId)));
+        }
+        if (!authorized) {
+            throw new AccessDeniedException("You do not have access to this store's analytics.");
+        }
+
         String storeName = storeRepository.findById(finalStoreId)
                 .map(Store::getName)
                 .orElse("Store " + finalStoreId);

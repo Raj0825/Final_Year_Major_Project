@@ -15,8 +15,7 @@ ml:
     predict-path: /predict
 
 jwt:
-  # NOTE: move this to an env var / secrets manager before deploying anywhere real
-  secret: ${JWT_SECRET:CHANGE_ME_dev_only_secret_key_please_replace_before_deploy_1234}
+  secret: ${JWT_SECRET}
   expiration-ms: 86400000 # 24h
 
 # Discount tier thresholds, kept configurable rather than hardcoded in the service

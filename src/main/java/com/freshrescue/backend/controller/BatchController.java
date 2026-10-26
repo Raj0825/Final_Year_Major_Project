@@ -16,7 +16,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/batches")
@@ -32,65 +34,50 @@ public class BatchController {
     public record UpdateTierRequest(Batch.BatchState state, Integer discountPercent) {}
 
     /**
-     * Resolves the caller's store reliably:
-     * 1) Checks the JWT claim (details).
-     * 2) Checks the User profile in MongoDB.
-     * 3) Checks stores owned by this manager in StoreRepository.
-     * 4) If the manager supplied a storeId, binds it to their profile.
+     * Resolves and verifies the caller's store:
+     * 1) Collects authorized store IDs from JWT claim, User profile, and StoreRepository.
+     * 2) If a requestStoreId is supplied, verifies it belongs to the caller's authorized stores.
+     * 3) If no store is associated, throws AccessDeniedException.
      */
     private String resolveAndVerifyStore(Authentication auth, String requestStoreId) {
         String userId = auth.getName();
         String staffStoreId = (String) auth.getDetails();
 
-        // 1. JWT claim
+        Set<String> authorizedStoreIds = new HashSet<>();
         if (staffStoreId != null && !staffStoreId.isBlank()) {
-            if (requestStoreId == null || requestStoreId.isBlank() || staffStoreId.equalsIgnoreCase(requestStoreId.trim())) {
-                return staffStoreId;
-            }
+            authorizedStoreIds.add(staffStoreId.trim());
         }
 
-        // 2. User entity from DB
         User user = userRepository.findById(userId).orElse(null);
         if (user != null && user.getStoreId() != null && !user.getStoreId().isBlank()) {
-            String dbStoreId = user.getStoreId();
-            if (requestStoreId == null || requestStoreId.isBlank() || dbStoreId.equalsIgnoreCase(requestStoreId.trim())) {
-                return dbStoreId;
-            }
+            authorizedStoreIds.add(user.getStoreId().trim());
         }
 
-        // 3. Store managed by this user
         List<Store> stores = storeRepository.findByManagerId(userId);
-        if (!stores.isEmpty()) {
-            if (requestStoreId == null || requestStoreId.isBlank()) {
-                return stores.get(0).getId();
+        for (Store s : stores) {
+            authorizedStoreIds.add(s.getId());
+            if (s.getName() != null && !s.getName().isBlank()) {
+                authorizedStoreIds.add(s.getName().trim());
             }
-            for (Store s : stores) {
-                if (s.getId().equalsIgnoreCase(requestStoreId.trim()) || s.getName().equalsIgnoreCase(requestStoreId.trim())) {
-                    return s.getId();
-                }
-            }
-            return stores.get(0).getId();
         }
 
-        // 4. If requestStoreId is provided, bind to user
+        if (authorizedStoreIds.isEmpty()) {
+            throw new AccessDeniedException("No store associated with your account.");
+        }
+
         if (requestStoreId != null && !requestStoreId.isBlank()) {
             String cleanId = requestStoreId.trim();
-            if (user != null) {
-                user.setStoreId(cleanId);
-                userRepository.save(user);
+            boolean match = authorizedStoreIds.stream().anyMatch(id -> id.equalsIgnoreCase(cleanId));
+            if (!match) {
+                throw new AccessDeniedException("You do not have access to store: " + cleanId);
             }
             return cleanId;
         }
 
-        // 5. Default fallback store ID for managers
-        if (user != null) {
-            String defaultStoreId = "store_" + userId.substring(Math.max(0, userId.length() - 4));
-            user.setStoreId(defaultStoreId);
-            userRepository.save(user);
-            return defaultStoreId;
-        }
-
-        throw new AccessDeniedException("No store associated with your account.");
+        // Return primary authorized store ID
+        if (staffStoreId != null && !staffStoreId.isBlank()) return staffStoreId.trim();
+        if (user != null && user.getStoreId() != null && !user.getStoreId().isBlank()) return user.getStoreId().trim();
+        return stores.get(0).getId();
     }
 
     @PostMapping
@@ -124,13 +111,8 @@ public class BatchController {
         List<Batch> result = new java.util.ArrayList<>();
         for (Batch b : all) {
             boolean matches = (b.getManagerId() != null && b.getManagerId().equals(userId))
-                    || (b.getStoreId() != null && myStoreIds.contains(b.getStoreId()))
-                    || b.getManagerId() == null; // auto-claim unassigned batches for single manager
+                    || (b.getStoreId() != null && myStoreIds.contains(b.getStoreId()));
             if (matches) {
-                if (b.getManagerId() == null) {
-                    b.setManagerId(userId);
-                    batchRepository.save(b);
-                }
                 result.add(b);
             }
         }

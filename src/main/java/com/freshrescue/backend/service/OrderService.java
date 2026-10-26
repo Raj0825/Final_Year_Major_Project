@@ -9,6 +9,7 @@ import com.freshrescue.backend.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -124,6 +125,14 @@ public class OrderService {
 
         if (order == null) {
             throw new IllegalArgumentException("No pending reservation found matching code: " + cleanCode);
+        }
+
+        if (staffStoreId == null || staffStoreId.isBlank()) {
+            throw new AccessDeniedException("No store associated with your account.");
+        }
+
+        if (order.getStoreId() != null && !order.getStoreId().equalsIgnoreCase(staffStoreId.trim())) {
+            throw new AccessDeniedException("Cannot fulfill orders belonging to another store.");
         }
 
         if (order.getStatus() != Order.OrderStatus.RESERVED) {

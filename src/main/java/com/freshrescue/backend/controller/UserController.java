@@ -69,8 +69,8 @@ public class UserController {
                         user.setLocation(new GeoJsonPoint(req.longitude(), req.latitude()));
                     }
                     if (req.storeId() != null && !req.storeId().isBlank() &&
-                            (user.getRole() == User.Role.STORE_MANAGER || user.getRole() == User.Role.STORE_STAFF)) {
-                        user.setStoreId(req.storeId().trim());
+                            !req.storeId().trim().equals(user.getStoreId())) {
+                        throw new IllegalArgumentException("Changing storeId is not permitted");
                     }
                     User saved = userRepository.save(user);
                     return ResponseEntity.ok(toResponse(saved));
