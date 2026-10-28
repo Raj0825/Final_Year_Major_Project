@@ -10,4 +10,6 @@ import java.util.List;
 public interface CloudOrderRepository extends MongoRepository<CloudOrder, String> {
     List<CloudOrder> findByStoreNameIgnoreCase(String storeName);
     List<CloudOrder> findByCustomerNameIgnoreCase(String customerName);
+    List<CloudOrder> findByCustomerEmailIgnoreCase(String customerEmail);
+    List<CloudOrder> findByStoreId(String storeId);
 }

@@ -39,15 +39,12 @@ export default function MyOrdersPage() {
     try {
       setLoading(true)
       const data = await getMyOrders()
-      if (data && data.length > 0) {
+      if (Array.isArray(data)) {
         // Guarantee newest booking is strictly on top
         const sorted = [...data].sort((a, b) => new Date(b.reservedAt || 0).getTime() - new Date(a.reservedAt || 0).getTime())
         setOrders(sorted)
       } else {
-        // Fallback to local session storage if available
-        const local: Order[] = JSON.parse(sessionStorage.getItem("my_orders") ?? "[]")
-        local.sort((a, b) => new Date(b.reservedAt || 0).getTime() - new Date(a.reservedAt || 0).getTime())
-        setOrders(local)
+        setOrders([])
       }
     } catch {
       const local: Order[] = JSON.parse(sessionStorage.getItem("my_orders") ?? "[]")

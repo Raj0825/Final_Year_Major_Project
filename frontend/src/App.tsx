@@ -25,7 +25,7 @@ import {
   loadInventory, saveInventory, loadOrders, saveOrders, loadNotifications,
   saveNotifications, loadSettings, saveSettings, addReservation,
   fulfillPickupOrder, cancelPickupOrder, loadStores, saveStores, upsertStore,
-  calculateDistance, clearAllData, setCurrentUserEmail, isItemForStore, InventoryItem, StoreOrder,
+  calculateDistance, clearAllData, setCurrentUserEmail, isItemForStore, loadMyOrders, isOrderForCustomer, InventoryItem, StoreOrder,
   AppNotification, UserSettings, RegisteredStore, DEFAULT_SETTINGS
 } from "@/data/mockStore";
 
@@ -306,11 +306,11 @@ function Login() {
         }
 
         // Set the current user email FIRST
-        setCurrentUserEmail(email);
+        setCurrentUserEmail(email.trim().toLowerCase());
 
         const targetStoreId = registeredUser?.storeId || `store_${Date.now()}`;
         const newSettings: UserSettings = {
-          ...loadSettings(),
+          ...DEFAULT_SETTINGS,
           name: name.trim() || (role === "supermarket" ? "Store Manager" : "Customer"),
           email: email.trim().toLowerCase(),
           role,
@@ -617,6 +617,7 @@ function Sidebar({ role, path, onNavigate, onOpenSettings }: { role: AppWorkspac
   const handleLogout = () => {
     localStorage.removeItem("fr_token");
     localStorage.removeItem("fr_user");
+    localStorage.removeItem("ss_current_email");
     setLocation("/");
   };
 
@@ -839,9 +840,11 @@ function DashboardHome({ onAction }: { onAction: (message: string) => void }) {
 
   const myInventory = inventory.filter(i => isItemForStore(i, settings.storeId, settings.storeName));
   const urgentItems = myInventory.filter(i => i.status === "Expiring soon" || i.flagged || i.expiryHoursLeft <= 6);
+  const currentStoreName = (settings.storeName || "").trim().toLowerCase();
+  const currentStoreId = (settings.storeId || "").trim();
   const myOrders = orders.filter(o =>
-    (settings.storeName && o.storeName && o.storeName.trim().toLowerCase() === settings.storeName.trim().toLowerCase()) ||
-    !o.storeName
+    (currentStoreId && o.storeId && o.storeId === currentStoreId) ||
+    (currentStoreName && o.storeName && o.storeName.trim().toLowerCase() === currentStoreName)
   );
   const pendingOrders = myOrders.filter(o => o.status === "RESERVED");
   const totalReservedKg = pendingOrders.reduce((acc, o) => acc + o.quantity, 0);
@@ -2169,9 +2172,11 @@ function SurplusPage({ onAction }: { onAction: (message: string) => void }) {
   const myInventory = inventory.filter(i => isItemForStore(i, settings.storeId, settings.storeName));
   const surplusItems = myInventory.filter(i => i.discountPercent > 0 || i.flagged || i.status === "Expiring soon" || i.status === "Reserved");
 
+  const currentStoreName = (settings.storeName || "").trim().toLowerCase();
+  const currentStoreId = (settings.storeId || "").trim();
   const myOrders = orders.filter(o =>
-    (settings.storeName && o.storeName && o.storeName.trim().toLowerCase() === settings.storeName.trim().toLowerCase()) ||
-    !o.storeName
+    (currentStoreId && o.storeId && o.storeId === currentStoreId) ||
+    (currentStoreName && o.storeName && o.storeName.trim().toLowerCase() === currentStoreName)
   );
   const totalAvailable = surplusItems.reduce((acc, curr) => acc + curr.available, 0);
   const totalReserved = myOrders.filter(o => o.status === "RESERVED").reduce((acc, curr) => acc + curr.quantity, 0);
@@ -2391,9 +2396,10 @@ function VerificationPage({ onAction }: { onAction: (message: string, kind?: Toa
   }, []);
 
   const currentStoreName = (settings.storeName || "").trim().toLowerCase();
+  const currentStoreId = (settings.storeId || "").trim();
   const myOrders = orders.filter(o =>
-    (currentStoreName && o.storeName && o.storeName.trim().toLowerCase() === currentStoreName) ||
-    !o.storeName
+    (currentStoreId && o.storeId && o.storeId === currentStoreId) ||
+    (currentStoreName && o.storeName && o.storeName.trim().toLowerCase() === currentStoreName)
   );
   const pendingOrders = myOrders.filter(o => o.status === "RESERVED");
   const fulfilledOrders = myOrders.filter(o => o.status === "FULFILLED");
@@ -2705,7 +2711,7 @@ function ImpactPage() {
 function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKind) => void }) {
   const [, setLocation] = useLocation();
   const [inventory, setInventory] = useState<InventoryItem[]>(loadInventory);
-  const [orders, setOrders] = useState<StoreOrder[]>(loadOrders);
+  const [orders, setOrders] = useState<StoreOrder[]>(() => loadMyOrders(loadSettings().email));
   const [settings, setSettings] = useState<UserSettings>(loadSettings);
   const [stores, setStores] = useState<RegisteredStore[]>(loadStores);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -2716,8 +2722,9 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
   useEffect(() => {
     const handleUpdate = () => {
       setInventory(loadInventory());
-      setOrders(loadOrders());
-      setSettings(loadSettings());
+      const s = loadSettings();
+      setSettings(s);
+      setOrders(loadMyOrders(s.email));
       setStores(loadStores());
     };
     window.addEventListener("ss_inventory_updated", handleUpdate);
@@ -2741,7 +2748,7 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
 
   const handleBuy = (item: InventoryItem) => {
     const qty = quantities[item.id] > 0 ? quantities[item.id] : 1;
-    const order = addReservation(item, qty, settings.name, settings.userLocation);
+    const order = addReservation(item, qty, settings.name, settings.userLocation, settings.email);
 
     onAction(`Reserved ${qty} ${item.unit} of ${item.name}! Your pickup QR pass is ready.`, "success");
     setSelectedReceipt(order);
@@ -3073,7 +3080,7 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
           isOpen={true}
           onClose={() => setDetailItem(null)}
           onReserve={(it, q) => {
-            const order = addReservation(it, q, settings.name);
+            const order = addReservation(it, q, settings.name, settings.userLocation, settings.email);
             onAction(`Reserved ${q} ${it.unit} of ${it.name}!`, "success");
             setSelectedReceipt(order);
           }}
@@ -3134,7 +3141,7 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
   const checkoutCart = () => {
     if (cart.length === 0) return;
     cart.forEach(({ item, qty }) => {
-      const order = addReservation(item, qty, settings.name, settings.userLocation);
+      const order = addReservation(item, qty, settings.name, settings.userLocation, settings.email);
       setSelectedReceipt(order);
     });
     setCart([]);
@@ -3169,7 +3176,7 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
 
   const handleBuy = (item: InventoryItem) => {
     const qty = quantities[item.id] > 0 ? quantities[item.id] : 1;
-    const order = addReservation(item, qty, settings.name, settings.userLocation);
+    const order = addReservation(item, qty, settings.name, settings.userLocation, settings.email);
     onAction(`Reserved ${qty} ${item.unit} of ${item.name}! Your pickup pass is ready.`, "success");
     setSelectedReceipt(order);
   };
@@ -3944,7 +3951,7 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
           isOpen={true}
           onClose={() => setDetailItem(null)}
           onReserve={(it, q) => {
-            const order = addReservation(it, q, settings.name, settings.userLocation);
+            const order = addReservation(it, q, settings.name, settings.userLocation, settings.email);
             onAction(`Reserved ${q} ${it.unit} of ${it.name}!`, "success");
             setSelectedReceipt(order);
           }}
@@ -3978,13 +3985,22 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
 // CUSTOMER & NGO WORKSPACE: ACTIVE QR PASSES
 // -------------------------------------------------------------
 function NgoActivePasses() {
-  const [orders, setOrders] = useState<StoreOrder[]>(loadOrders);
+  const [settings, setSettings] = useState<UserSettings>(loadSettings);
+  const [orders, setOrders] = useState<StoreOrder[]>(() => loadMyOrders(loadSettings().email));
   const [selectedReceipt, setSelectedReceipt] = useState<StoreOrder | null>(null);
 
   useEffect(() => {
-    const handleUpdate = () => setOrders(loadOrders());
+    const handleUpdate = () => {
+      const s = loadSettings();
+      setSettings(s);
+      setOrders(loadMyOrders(s.email));
+    };
     window.addEventListener("ss_orders_updated", handleUpdate);
-    return () => window.removeEventListener("ss_orders_updated", handleUpdate);
+    window.addEventListener("ss_settings_updated", handleUpdate);
+    return () => {
+      window.removeEventListener("ss_orders_updated", handleUpdate);
+      window.removeEventListener("ss_settings_updated", handleUpdate);
+    };
   }, []);
 
   const activeOrders = orders.filter(o => o.status === "RESERVED");
@@ -4096,15 +4112,24 @@ function NgoActivePasses() {
 // CUSTOMER & NGO WORKSPACE: ORDER HISTORY (My Orders)
 // -------------------------------------------------------------
 function NgoHistory() {
-  const [orders, setOrders] = useState<StoreOrder[]>(loadOrders);
+  const [settings, setSettings] = useState<UserSettings>(loadSettings);
+  const [orders, setOrders] = useState<StoreOrder[]>(() => loadMyOrders(loadSettings().email));
   const [filter, setFilter] = useState<"ALL" | "RESERVED" | "FULFILLED" | "CANCELLED">("ALL");
   const [search, setSearch] = useState("");
   const [selectedReceipt, setSelectedReceipt] = useState<StoreOrder | null>(null);
 
   useEffect(() => {
-    const handleUpdate = () => setOrders(loadOrders());
+    const handleUpdate = () => {
+      const s = loadSettings();
+      setSettings(s);
+      setOrders(loadMyOrders(s.email));
+    };
     window.addEventListener("ss_orders_updated", handleUpdate);
-    return () => window.removeEventListener("ss_orders_updated", handleUpdate);
+    window.addEventListener("ss_settings_updated", handleUpdate);
+    return () => {
+      window.removeEventListener("ss_orders_updated", handleUpdate);
+      window.removeEventListener("ss_settings_updated", handleUpdate);
+    };
   }, []);
 
   const filtered = orders.filter(o => {

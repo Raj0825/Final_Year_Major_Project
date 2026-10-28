@@ -16,10 +16,12 @@ public class CloudOrder {
     @Id
     private String id;
     private String listingId;
+    private String storeId;
     private String productName;
     private String storeName;
     private String storeLocation;
     private String customerName;
+    private String customerEmail;
     private String customerPhone;
     private String customerLocation;
     private double quantity;

@@ -43,10 +43,12 @@ export interface InventoryItem {
 export interface StoreOrder {
   id: string;
   listingId: string;
+  storeId?: string;
   productName: string;
   storeName: string;
   storeLocation?: string;
   customerName: string;
+  customerEmail?: string;
   customerPhone?: string;
   customerLocation?: string;
   quantity: number;
@@ -135,11 +137,28 @@ function settingsKeyForEmail(email: string): string {
 
 // Get the email of the currently logged-in user
 export function getCurrentUserEmail(): string {
-  return localStorage.getItem(STORAGE_KEYS.CURRENT_EMAIL) || "";
+  try {
+    const email = localStorage.getItem(STORAGE_KEYS.CURRENT_EMAIL);
+    if (email && email.trim()) return email.toLowerCase().trim();
+    const rawUser = localStorage.getItem("fr_user");
+    if (rawUser) {
+      const u = JSON.parse(rawUser);
+      if (u.email && typeof u.email === "string" && u.email.trim()) {
+        const e = u.email.toLowerCase().trim();
+        localStorage.setItem(STORAGE_KEYS.CURRENT_EMAIL, e);
+        return e;
+      }
+    }
+  } catch {}
+  return "";
 }
 
 export function setCurrentUserEmail(email: string) {
-  localStorage.setItem(STORAGE_KEYS.CURRENT_EMAIL, email.toLowerCase());
+  if (email && email.trim()) {
+    localStorage.setItem(STORAGE_KEYS.CURRENT_EMAIL, email.toLowerCase().trim());
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_EMAIL);
+  }
 }
 
 // Purge obsolete mock data from legacy sessions
@@ -410,6 +429,20 @@ export function loadOrders(): StoreOrder[] {
   return [];
 }
 
+// Customer Order Filtering Utilities
+export function isOrderForCustomer(order: StoreOrder, customerEmail?: string): boolean {
+  if (!order) return false;
+  const targetEmail = (customerEmail || getCurrentUserEmail() || "").toLowerCase().trim();
+  if (!targetEmail) return false;
+  return Boolean(order.customerEmail && order.customerEmail.toLowerCase().trim() === targetEmail);
+}
+
+export function loadMyOrders(customerEmail?: string): StoreOrder[] {
+  const targetEmail = (customerEmail || getCurrentUserEmail() || "").toLowerCase().trim();
+  if (!targetEmail) return [];
+  return loadOrders().filter(o => isOrderForCustomer(o, targetEmail));
+}
+
 export function saveOrders(orders: StoreOrder[]) {
   try {
     localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
@@ -452,8 +485,10 @@ export function loadSettings(): UserSettings {
         const parsed = JSON.parse(raw);
         return { ...DEFAULT_SETTINGS, ...parsed };
       }
+      // If an active user email exists but has no saved settings yet, do not fall back to another user's legacy settings!
+      return { ...DEFAULT_SETTINGS, email };
     }
-    // Fallback: legacy single-key (for existing sessions)
+    // Fallback: legacy single-key (for existing sessions with no email stored)
     const legacyRaw = localStorage.getItem("ss_settings_v4");
     if (legacyRaw) {
       const parsed = JSON.parse(legacyRaw);
@@ -480,16 +515,25 @@ export function saveSettings(settings: UserSettings) {
 }
 
 // Reservation & Order Operations
-export function addReservation(item: InventoryItem, qty: number, customerName: string, customerLocation?: string): StoreOrder {
+export function addReservation(
+  item: InventoryItem,
+  qty: number,
+  customerName: string,
+  customerLocation?: string,
+  customerEmail?: string
+): StoreOrder {
   const currentOrders = loadOrders();
   const randomPass = "SS-" + Math.floor(1000 + Math.random() * 9000);
+  const email = (customerEmail || getCurrentUserEmail() || "").toLowerCase().trim();
   const newOrder: StoreOrder = {
     id: "ord-" + Date.now(),
     listingId: item.id,
+    storeId: item.storeId,
     productName: item.name,
     storeName: item.store,
     storeLocation: item.storeLocation || "Market Store Counter",
     customerName: customerName || "Customer",
+    customerEmail: email,
     customerLocation: customerLocation || "Local Area",
     quantity: qty,
     unit: item.unit,
@@ -660,10 +704,20 @@ export async function syncFromCloud(): Promise<void> {
 
     if (orderRes.status === "fulfilled" && Array.isArray(orderRes.value.data)) {
       const cloudOrders = orderRes.value.data;
-      if (cloudOrders.length > 0) {
+      const currentEmail = getCurrentUserEmail();
+      const currentOrders = loadOrders();
+
+      if (currentEmail) {
+        // Retain orders from other users, and synchronize current user's orders with cloud
+        const otherOrders = currentOrders.filter(
+          o => !o.customerEmail || o.customerEmail.toLowerCase().trim() !== currentEmail
+        );
+        const merged = [...cloudOrders, ...otherOrders];
+        localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(merged));
+      } else if (cloudOrders.length > 0) {
         localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(cloudOrders));
-        window.dispatchEvent(new Event("ss_orders_updated"));
       }
+      window.dispatchEvent(new Event("ss_orders_updated"));
     }
   } catch {
     // Cloud sync offline or waking up

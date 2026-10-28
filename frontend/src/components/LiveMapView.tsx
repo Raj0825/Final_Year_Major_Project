@@ -12,7 +12,7 @@ function injectLeafletCSS() {
   document.head.appendChild(link);
 }
 
-function deterministicCoords(seed, baseLat, baseLng) {
+function deterministicCoords(seed: string, baseLat: number, baseLng: number) {
   let h1 = 0, h2 = 0;
   for (let i = 0; i < seed.length; i++) {
     h1 = (Math.imul(31, h1) + seed.charCodeAt(i)) | 0;
@@ -99,6 +99,7 @@ export default function LiveMapView() {
       const L = mod.default || mod;
       if (lmRef.current) { lmRef.current.remove(); lmRef.current = null; }
       const c = userPos || DC;
+      if (!mapRef.current) return;
       const map = L.map(mapRef.current, { center: [c.lat, c.lng], zoom: 13, zoomControl: false });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap', maxZoom: 19 }).addTo(map);
       lmRef.current = map;
@@ -233,7 +234,7 @@ export default function LiveMapView() {
               {selected.items.length > 0 ? (
                 <div className="space-y-2">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-[#7D7670] mb-1">Items</p>
-                  {selected.items.slice(0, 6).map(item => (
+                  {selected.items.slice(0, 6).map((item: any) => (
                     <div key={item.id} className="flex items-center justify-between rounded-xl bg-[#F8F6F1] dark:bg-[#26312E] px-3 py-2">
                       <div><p className="text-xs font-semibold text-[#2E221F] dark:text-[#F0F4F2]">{item.name}</p><p className="text-[10px] text-[#8A847E]">{item.available} {item.unit}</p></div>
                       <div className="text-right"><p className="text-xs font-bold text-[#10B981]">Rs.{item.currentPrice}</p>{(item.expiryHoursLeft <= 24 || item.status === 'Expiring soon') && <span className="text-[9px] font-bold text-red-500">URGENT</span>}</div>

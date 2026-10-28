@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, RadialBarChart, RadialBar, Legend } from 'recharts';
 import { Leaf, Droplets, Flame, TrendingUp, Award, Download, RefreshCw, Zap, Wind, Globe, TreePine, ShoppingBag } from 'lucide-react';
-import { loadInventory, loadOrders, loadSettings } from '@/data/mockStore';
+import { loadInventory, loadOrders, loadSettings, loadMyOrders } from '@/data/mockStore';
 
 // ESG calculation constants (per kg of food rescued)
 const ESG_FACTORS = {
@@ -58,7 +58,10 @@ export default function ESGDashboard() {
 
   // Calculate metrics from real data
   const totalItems = inventory.length;
-  const fulfilledOrders = orders.filter(o => o.status === 'FULFILLED');
+  const relevantOrders = settings.role === 'supermarket'
+    ? orders.filter(o => settings.storeName && o.storeName && o.storeName.trim().toLowerCase() === settings.storeName.trim().toLowerCase())
+    : loadMyOrders(settings.email);
+  const fulfilledOrders = relevantOrders.filter(o => o.status === 'FULFILLED');
   const totalQtyRescued = fulfilledOrders.reduce((s, o) => s + o.quantity, 0);
   const totalValueSaved = fulfilledOrders.reduce((s, o) => s + (o.priceAtOrder * o.quantity), 0);
   const avgDiscount = inventory.length > 0 ? inventory.reduce((s, i) => s + i.discountPercent, 0) / inventory.length : 0;

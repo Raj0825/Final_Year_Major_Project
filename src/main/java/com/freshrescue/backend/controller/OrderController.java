@@ -1,7 +1,6 @@
 package com.freshrescue.backend.controller;
 
 import com.freshrescue.backend.entity.Batch;
-import com.freshrescue.backend.entity.Listing;
 import com.freshrescue.backend.entity.Order;
 import com.freshrescue.backend.entity.Store;
 import com.freshrescue.backend.entity.User;
@@ -33,9 +32,14 @@ public class OrderController {
     private final BatchRepository batchRepository;
     private final ListingRepository listingRepository;
 
-    public record ReserveRequest(String listingId, double quantity) {}
-    public record FulfillRequest(String qrCode) {}
-    public record FulfillCodeRequest(String code) {}
+    public record ReserveRequest(String listingId, double quantity) {
+    }
+
+    public record FulfillRequest(String qrCode) {
+    }
+
+    public record FulfillCodeRequest(String code) {
+    }
 
     /**
      * Customer / NGO view: all my orders, newest booking at the top.
@@ -138,9 +142,11 @@ public class OrderController {
 
     @PostMapping("/{id}/fulfill")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
-    public Order fulfill(@PathVariable String id, @RequestBody(required = false) FulfillRequest request, Authentication auth) {
+    public Order fulfill(@PathVariable String id, @RequestBody(required = false) FulfillRequest request,
+            Authentication auth) {
         String staffStoreId = resolveStaffStoreId(auth);
-        String code = (request != null && request.qrCode() != null && !request.qrCode().isBlank()) ? request.qrCode() : id;
+        String code = (request != null && request.qrCode() != null && !request.qrCode().isBlank()) ? request.qrCode()
+                : id;
         return orderService.fulfillByCodeOrId(code, staffStoreId);
     }
 
@@ -158,7 +164,8 @@ public class OrderController {
 
     private Set<String> getManagerStoreIds(String userId, String detailsStoreId) {
         Set<String> storeIds = new HashSet<>();
-        if (detailsStoreId != null && !detailsStoreId.isBlank()) storeIds.add(detailsStoreId.trim());
+        if (detailsStoreId != null && !detailsStoreId.isBlank())
+            storeIds.add(detailsStoreId.trim());
         User user = userRepository.findById(userId).orElse(null);
         if (user != null && user.getStoreId() != null && !user.getStoreId().isBlank()) {
             storeIds.add(user.getStoreId().trim());
