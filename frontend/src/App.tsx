@@ -25,12 +25,11 @@ import {
   loadInventory, saveInventory, loadOrders, saveOrders, loadNotifications,
   saveNotifications, loadSettings, saveSettings, addReservation,
   fulfillPickupOrder, cancelPickupOrder, loadStores, saveStores, upsertStore,
-  calculateDistance, clearAllData, setCurrentUserEmail, isItemForStore, loadMyOrders, isOrderForCustomer, deduplicateOrders, InventoryItem, StoreOrder,
+  calculateDistance, isSameCity, resolveCoordinates, clearAllData, setCurrentUserEmail, isItemForStore, loadMyOrders, isOrderForCustomer, deduplicateOrders, InventoryItem, StoreOrder,
   AppNotification, UserSettings, RegisteredStore, DEFAULT_SETTINGS
 } from "@/data/mockStore";
 
-import { SettingsModal } from "@/components/modals/SettingsModal";
-import { AreaSelectorModal } from "@/components/modals/AreaSelectorModal";
+import { SettingsModal, SettingsTab } from "@/components/modals/SettingsModal";
 import { ProductDetailModal } from "@/components/modals/ProductDetailModal";
 import { EditBatchModal } from "@/components/modals/EditBatchModal";
 import { ReceiptModal } from "@/components/modals/ReceiptModal";
@@ -306,14 +305,23 @@ function Login() {
         }
 
         // Set the current user email FIRST
-        setCurrentUserEmail(email.trim().toLowerCase());
+        const cleanEmail = email.trim().toLowerCase();
+        setCurrentUserEmail(cleanEmail);
 
         const targetStoreId = registeredUser?.storeId || `store_${Date.now()}`;
+        const locCoords = resolveCoordinates(
+          city.trim(),
+          role === "supermarket" ? storeArea.trim() : selectedArea.trim(),
+          role === "supermarket" ? storeLocation.trim() : userLocation.trim()
+        );
+
         const newSettings: UserSettings = {
           ...DEFAULT_SETTINGS,
           name: name.trim() || (role === "supermarket" ? "Store Manager" : "Customer"),
-          email: email.trim().toLowerCase(),
+          email: cleanEmail,
           role,
+          gpsLat: locCoords.lat,
+          gpsLng: locCoords.lng,
           ...(role === "supermarket" ? {
             storeId: targetStoreId,
             storeName: storeName.trim() || "My Store",
@@ -352,14 +360,13 @@ function Login() {
           return;
         }
 
-        // 3. When the logged-in user (email) differs from the one in local settings, discard old local settings.
+        // Set the current user email FIRST so loadSettings loads this specific user's saved permanent settings
         const cleanEmail = email.trim().toLowerCase();
+        setCurrentUserEmail(cleanEmail);
+
         const prevSettings = loadSettings();
         const isDifferentUser = prevSettings.email && prevSettings.email.trim().toLowerCase() !== cleanEmail;
-        const currentSettings = isDifferentUser ? { ...DEFAULT_SETTINGS } : prevSettings;
-
-        // Set the current user email
-        setCurrentUserEmail(cleanEmail);
+        const currentSettings = isDifferentUser ? { ...DEFAULT_SETTINGS, email: cleanEmail } : prevSettings;
 
         let targetStoreId = "";
         let storeNameVal = "";
@@ -1168,7 +1175,7 @@ function DashboardHome({ onAction }: { onAction: (message: string) => void }) {
   );
 }
 
-function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
+function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: string) => void; onOpenSettings?: (tab?: SettingsTab) => void }) {
   const [, setLocation] = useLocation();
   const [inventory, setInventory] = useState<InventoryItem[]>(loadInventory);
   const [search, setSearch] = useState("");
@@ -1197,15 +1204,12 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
     return d.toISOString().split("T")[0];
   });
   const [settings, setSettings] = useState<UserSettings>(loadSettings);
-  const [newStoreCity, setNewStoreCity] = useState(() => loadSettings().storeCity || "");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const handleUpdate = () => {
       setInventory(loadInventory());
-      const s = loadSettings();
-      setSettings(s);
-      if (s.storeCity) setNewStoreCity(s.storeCity);
+      setSettings(loadSettings());
     };
     window.addEventListener("ss_inventory_updated", handleUpdate);
     window.addEventListener("ss_settings_updated", handleUpdate);
@@ -1226,13 +1230,11 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
       const currentStoreId = (currentSettings.storeId && currentSettings.storeId !== "store-default")
         ? currentSettings.storeId
         : `store_${Date.now()}`;
-      const effectiveCity = newStoreCity.trim() || currentSettings.storeCity?.trim() || "";
+      const effectiveCity = currentSettings.storeCity?.trim() || "Solapur";
       const storeInitials = currentStoreName.substring(0, 2).toUpperCase() || "SM";
 
       if (!currentSettings.storeId || currentSettings.storeId === "store-default") {
         saveSettings({ ...currentSettings, storeId: currentStoreId, storeCity: effectiveCity });
-      } else if (newStoreCity.trim() && newStoreCity.trim() !== currentSettings.storeCity) {
-        saveSettings({ ...currentSettings, storeCity: newStoreCity.trim() });
       }
 
       // Calculate expiry hours from selected date
@@ -1752,21 +1754,30 @@ function InventoryPage({ onAction }: { onAction: (message: string) => void }) {
                 </div>
               </div>
 
-              {/* Store City */}
-              <div>
-                <label className="block text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">
-                  Store City <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={newStoreCity}
-                  onChange={e => setNewStoreCity(e.target.value)}
-                  required
-                  placeholder="e.g. Pune, Mumbai, Delhi, Bangalore"
-                  className="ss-input mt-1"
-                />
-                <p className="text-[11px] text-[#7A746E] dark:text-[#A3B2AC] mt-0.5">
-                  Customers in this city will see this food batch in their nearby surplus feed.
+              {/* Store Location & City (Permanent, set at registration) */}
+              <div className="p-3 rounded-xl bg-[#FAF8F5] dark:bg-[#192220] border border-[#EAE6DF] dark:border-[#2D3835]">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-[#00897B] dark:text-[#2DD4BF]" />
+                    <span className="text-xs font-semibold text-[#2D2320] dark:text-[#E2E8E5]">
+                      Publishing Store: <span className="font-bold text-[#00897B] dark:text-[#2DD4BF]">{settings.storeName || "My Store"} ({settings.storeCity || "Solapur"})</span>
+                    </span>
+                  </div>
+                  {onOpenSettings && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModalOpen(false);
+                        onOpenSettings("location");
+                      }}
+                      className="text-[11px] font-semibold text-[#00897B] dark:text-[#2DD4BF] hover:underline cursor-pointer"
+                    >
+                      Edit in Settings
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-[#7A746E] dark:text-[#A3B2AC] mt-1">
+                  Location is permanently set. Customers in {settings.storeCity || "your city"} will see this surplus batch.
                 </p>
               </div>
 
@@ -2708,14 +2719,13 @@ function ImpactPage() {
 // -------------------------------------------------------------
 // CUSTOMER & NGO WORKSPACE: OVERVIEW
 // -------------------------------------------------------------
-function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKind) => void }) {
+function NgoOverview({ onAction, onOpenSettings }: { onAction: (message: string, kind?: ToastKind) => void; onOpenSettings?: (tab?: SettingsTab) => void }) {
   const [, setLocation] = useLocation();
   const [inventory, setInventory] = useState<InventoryItem[]>(loadInventory);
   const [orders, setOrders] = useState<StoreOrder[]>(() => loadMyOrders(loadSettings().email));
   const [settings, setSettings] = useState<UserSettings>(loadSettings);
   const [stores, setStores] = useState<RegisteredStore[]>(loadStores);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const [areaModalOpen, setAreaModalOpen] = useState(false);
   const [detailItem, setDetailItem] = useState<InventoryItem | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<StoreOrder | null>(null);
 
@@ -2754,44 +2764,80 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
     setSelectedReceipt(order);
   };
 
-  const handleSaveArea = (area: string, radius: number) => {
-    saveSettings({ ...settings, selectedArea: area, searchRadiusKm: radius });
-    onAction(`Location updated (${radius} km radius).`);
-  };
-
   const activeReservations = orders.filter(o => o.status === "RESERVED");
   const fulfilledOrders = orders.filter(o => o.status === "FULFILLED");
 
-  // Dynamic Supermarket Mapping and Distance calculation
-  const storeMap = new Map<string, { id: string; name: string; location: string; area: string; itemCount: number; distance: string; km: number }>();
+  const userCity = (settings.userCity || "").trim();
 
-  // Add all registered supermarkets
+  // Dynamic Supermarket Mapping and Distance calculation
+  const storeMap = new Map<string, { id: string; name: string; location: string; area: string; city: string; itemCount: number; distance: string; km: number }>();
+
+  // Add all registered supermarkets that match user's city
   stores.forEach(s => {
-    const dist = calculateDistance(settings.userLocation || settings.selectedArea, s.location || s.area);
-    const count = inventory.filter(i => i.store.toLowerCase() === s.name.toLowerCase() && i.available > 0).length;
+    // Multi-city isolation: user in City A cannot see store in City B
+    if (userCity && s.city && !isSameCity(userCity, s.city)) {
+      return;
+    }
+
+    const dist = calculateDistance(
+      settings.userLocation || settings.selectedArea,
+      s.location || s.area,
+      userCity,
+      s.city
+    );
+
+    if (!dist.sameCity) return;
+
+    const count = inventory.filter(i => {
+      if (userCity && i.storeCity && !isSameCity(userCity, i.storeCity)) return false;
+      const matchStore = (i.store && s.name && i.store.toLowerCase() === s.name.toLowerCase()) || (i.storeId && s.id && i.storeId === s.id);
+      return matchStore && i.available > 0;
+    }).length;
+
     storeMap.set(s.name.toLowerCase(), {
       id: s.id,
       name: s.name,
       location: s.location,
       area: s.area,
+      city: s.city,
       itemCount: count,
       distance: dist.display,
       km: dist.km
     });
   });
 
-  // Also include any stores that have items listed in inventory
+  // Also include any stores that have items listed in inventory in the user's city
   inventory.forEach(inv => {
+    if (userCity && inv.storeCity && !isSameCity(userCity, inv.storeCity)) {
+      return;
+    }
     const key = inv.store.toLowerCase();
     if (!storeMap.has(key)) {
-      const loc = inv.storeLocation || "Market Area";
-      const dist = calculateDistance(settings.userLocation || settings.selectedArea, loc);
-      const count = inventory.filter(i => i.store.toLowerCase() === key && i.available > 0).length;
+      const matchedStore = stores.find(st => st.name.toLowerCase() === key);
+      const storeCity = inv.storeCity || matchedStore?.city || "";
+      if (userCity && storeCity && !isSameCity(userCity, storeCity)) {
+        return;
+      }
+      const loc = inv.storeLocation || matchedStore?.location || "Market Area";
+      const dist = calculateDistance(
+        settings.userLocation || settings.selectedArea,
+        loc,
+        userCity,
+        storeCity
+      );
+      if (!dist.sameCity) return;
+
+      const count = inventory.filter(i => {
+        if (userCity && i.storeCity && !isSameCity(userCity, i.storeCity)) return false;
+        return i.store.toLowerCase() === key && i.available > 0;
+      }).length;
+
       storeMap.set(key, {
         id: inv.storeId || key,
         name: inv.store,
         location: loc,
-        area: inv.storeArea || "Local Area",
+        area: inv.storeArea || matchedStore?.area || "Local Area",
+        city: storeCity,
         itemCount: count,
         distance: dist.display,
         km: dist.km
@@ -2799,7 +2845,9 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
     }
   });
 
-  const nearbySupermarkets = Array.from(storeMap.values()).sort((a, b) => a.km - b.km);
+  const nearbySupermarkets = Array.from(storeMap.values())
+    .filter(s => !settings.searchRadiusKm || s.km <= settings.searchRadiusKm)
+    .sort((a, b) => a.km - b.km);
 
   return (
     <div className="ss-reveal max-w-6xl mx-auto space-y-6">
@@ -2809,14 +2857,15 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
           <p className="text-xs font-bold uppercase tracking-wider text-[#00897B] dark:text-[#2DD4BF]">VERIFIED SURPLUS STORES</p>
           <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] dark:text-[#F0F4F2] mt-1">Food available nearby</h1>
           <p className="text-sm text-[#78726B] dark:text-[#A3B2AC] mt-1">
-            Browse discounted food within {settings.searchRadiusKm} km of {settings.userLocation || settings.selectedArea}, choose quantity, and collect on time.
+            Browse discounted food in {userCity || "your city"} within {settings.searchRadiusKm} km of {settings.userLocation || settings.selectedArea}, choose quantity, and collect on time.
           </p>
         </div>
         <button
-          onClick={() => setAreaModalOpen(true)}
+          onClick={() => onOpenSettings?.("location")}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-xs font-semibold text-[#2D2320] dark:text-[#F0F4F2] shadow-sm hover:bg-[#FAF8F5] dark:hover:bg-[#2A3532] shrink-0 self-start sm:self-center cursor-pointer transition-all"
+          title="Permanent Location • Click to edit in Settings"
         >
-          <MapPin className="h-3.5 w-3.5 text-[#00897B] dark:text-[#2DD4BF]" /> {settings.userLocation || settings.selectedArea} ({settings.searchRadiusKm}km)
+          <MapPin className="h-3.5 w-3.5 text-[#00897B] dark:text-[#2DD4BF]" /> {userCity ? `${userCity} • ` : ""}{settings.userLocation || settings.selectedArea} ({settings.searchRadiusKm}km)
         </button>
       </div>
 
@@ -2831,7 +2880,7 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
             </span>
           </div>
           <button
-            onClick={() => setAreaModalOpen(true)}
+            onClick={() => onOpenSettings?.("location")}
             className="text-xs font-semibold text-[#00897B] dark:text-[#2DD4BF] hover:underline flex items-center gap-1 cursor-pointer"
           >
             Change radius ({settings.searchRadiusKm} km) &rarr;
@@ -2841,9 +2890,13 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
         {nearbySupermarkets.length === 0 ? (
           <div className="py-10 text-center">
             <Building2 className="h-8 w-8 text-[#A3B2AC] mx-auto mb-2 opacity-50" />
-            <p className="text-sm font-bold text-[#2E221F] dark:text-[#F0F4F2]">No Supermarkets Registered Yet</p>
+            <p className="text-sm font-bold text-[#2E221F] dark:text-[#F0F4F2]">
+              {userCity ? `No Supermarkets Registered in ${userCity} Yet` : "No Supermarkets Registered Yet"}
+            </p>
             <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-1 max-w-sm mx-auto">
-              When supermarkets join and add their store name & location, they will appear here with live surplus food.
+              {userCity
+                ? `Only supermarkets located in ${userCity} are shown to you. When local stores join, they will appear here.`
+                : "When supermarkets join and add their store name & location, they will appear here with live surplus food."}
             </p>
           </div>
         ) : (
@@ -2956,16 +3009,33 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
           </div>
 
           <div className="mt-4 space-y-3">
-            {inventory.length === 0 ? (
-              <div className="py-12 text-center rounded-xl border border-dashed border-[#EAE6DF] dark:border-[#2D3835]">
-                <Boxes className="h-8 w-8 text-[#A3B2AC] mx-auto mb-2 opacity-50" />
-                <p className="text-sm font-bold text-[#2E221F] dark:text-[#F0F4F2]">No surplus food listed yet</p>
-                <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-1 max-w-xs mx-auto">
-                  When nearby supermarkets list surplus produce or bakery batches, they will appear here.
-                </p>
-              </div>
-            ) : (
-              inventory.slice(0, 5).map(item => (
+            {(() => {
+              const availableInCity = inventory.filter(item => {
+                if (userCity && item.storeCity && !isSameCity(userCity, item.storeCity)) return false;
+                if (userCity && !item.storeCity && item.store) {
+                  const matchedStore = stores.find(s => s.name.toLowerCase() === item.store.toLowerCase());
+                  if (matchedStore?.city && !isSameCity(userCity, matchedStore.city)) return false;
+                }
+                return item.available > 0;
+              });
+
+              if (availableInCity.length === 0) {
+                return (
+                  <div className="py-12 text-center rounded-xl border border-dashed border-[#EAE6DF] dark:border-[#2D3835]">
+                    <Boxes className="h-8 w-8 text-[#A3B2AC] mx-auto mb-2 opacity-50" />
+                    <p className="text-sm font-bold text-[#2E221F] dark:text-[#F0F4F2]">
+                      {userCity ? `No surplus food listed in ${userCity} yet` : "No surplus food listed yet"}
+                    </p>
+                    <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-1 max-w-xs mx-auto">
+                      {userCity
+                        ? `When supermarkets in ${userCity} list surplus produce or bakery batches, they will appear here.`
+                        : "When nearby supermarkets list surplus produce or bakery batches, they will appear here."}
+                    </p>
+                  </div>
+                );
+              }
+
+              return availableInCity.slice(0, 5).map(item => (
                 <div key={item.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-xl border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1A2220] gap-3 hover:border-[#FF6548]/40 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#F5F5F3] dark:bg-[#25302D] text-[#7A746E] dark:text-[#A3B2AC] shrink-0">
@@ -2977,7 +3047,7 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
                         <StatusBadge label={item.status} />
                       </div>
                       <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-0.5">
-                        <span className="font-semibold text-[#00897B] dark:text-[#2DD4BF]">{item.store}</span> • {item.available} {item.unit} left • {calculateDistance(settings.userLocation || settings.selectedArea, item.storeLocation || item.store).display} away
+                        <span className="font-semibold text-[#00897B] dark:text-[#2DD4BF]">{item.store}</span> • {item.available} {item.unit} left • {calculateDistance(settings.userLocation || settings.selectedArea, item.storeLocation || item.store, userCity, item.storeCity).display} away
                       </p>
                     </div>
                   </div>
@@ -3017,8 +3087,8 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
                     </button>
                   </div>
                 </div>
-              ))
-            )}
+              ));
+            })()}
           </div>
         </div>
 
@@ -3066,13 +3136,6 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
         </div>
       </div>
 
-      {/* Area Selector Modal */}
-      <AreaSelectorModal
-        isOpen={areaModalOpen}
-        onClose={() => setAreaModalOpen(false)}
-        onSelected={handleSaveArea}
-      />
-
       {/* Product Detail Modal */}
       {detailItem && (
         <ProductDetailModal
@@ -3102,7 +3165,7 @@ function NgoOverview({ onAction }: { onAction: (message: string, kind?: ToastKin
 // -------------------------------------------------------------
 // CUSTOMER & NGO WORKSPACE: BROWSE FOOD (Matching Screenshot 2)
 // -------------------------------------------------------------
-function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: ToastKind) => void }) {
+function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: string, kind?: ToastKind) => void; onOpenSettings?: (tab?: SettingsTab) => void }) {
   const searchParams = new URLSearchParams(window.location.search);
   const initialStore = searchParams.get("store") || "All";
 
@@ -3183,33 +3246,38 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
 
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [compareMode, setCompareMode] = useState(false);
-  const [cityModalOpen, setCityModalOpen] = useState(false);
 
   // The user's city (normalised for comparison)
-  const userCity = (settings.userCity || "").trim().toLowerCase();
+  const userCity = (settings.userCity || "").trim();
+
+  // Helper to normalize store names for grouping and filtering
+  const normStore = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "").replace("kirna", "kirana");
 
   // Helper: check if a store/item is in the user's city
-  const isSameCity = (storeCity?: string, storeName?: string) => {
-    if (!userCity) return true; // if user hasn't set city, show everything
-    const effectiveCity = (storeCity || (storeName ? stores.find(s => s.name.toLowerCase() === storeName.toLowerCase())?.city : "") || "").trim().toLowerCase();
-    if (!effectiveCity) return false; // item with no city set can't match
-    return effectiveCity === userCity || effectiveCity.includes(userCity) || userCity.includes(effectiveCity);
+  const isItemInUserCity = (storeCity?: string, storeName?: string) => {
+    if (!userCity) return true;
+    const effectiveCity = (storeCity || (storeName ? stores.find(s => normStore(s.name) === normStore(storeName))?.city : "") || "").trim();
+    if (!effectiveCity) return false;
+    return isSameCity(userCity, effectiveCity);
   };
 
   // City-filtered inventory: only items whose store is in the user's city (+ within radius)
   const cityFilteredInventory = inventory.filter(item => {
-    // City match
-    if (!isSameCity(item.storeCity, item.store)) return false;
-    // Distance / radius check (when user has set location)
-    if (settings.userLocation || settings.selectedArea) {
-      const dist = calculateDistance(settings.userLocation || settings.selectedArea, item.storeLocation || item.store);
-      if (settings.searchRadiusKm && dist.km > settings.searchRadiusKm) return false;
-    }
+    // Multi-city boundary: user in City A cannot see items in City B
+    if (!isItemInUserCity(item.storeCity, item.store)) return false;
+
+    // Distance / radius check using Haversine algorithm
+    const dist = calculateDistance(
+      settings.userLocation || settings.selectedArea,
+      item.storeLocation || item.store,
+      userCity,
+      item.storeCity
+    );
+    if (!dist.sameCity) return false;
+    if (settings.searchRadiusKm && dist.km > settings.searchRadiusKm) return false;
+
     return true;
   });
-
-  // Helper to normalize store names for grouping and filtering
-  const normStore = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "").replace("kirna", "kirana");
 
   // Build list of distinct supermarkets (only stores that have surplus food in user's city)
   const distinctStoreMap = new Map<string, { name: string; location: string; city: string; distance: string }>();
@@ -3224,7 +3292,7 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
         name: matched?.name || i.store,
         location: matched?.location || i.storeLocation || "Market Area",
         city: matched?.city || i.storeCity || "",
-        distance: calculateDistance(settings.userLocation || settings.selectedArea, matched?.location || i.storeLocation || i.store).display
+        distance: calculateDistance(settings.userLocation || settings.selectedArea, matched?.location || i.storeLocation || i.store, userCity, i.storeCity).display
       });
     }
   });
@@ -3243,8 +3311,8 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
   }).sort((a, b) => {
     if (sortBy === "price_asc") return a.currentPrice - b.currentPrice;
     if (sortBy === "freshness") return b.freshnessScore - a.freshnessScore;
-    const distA = calculateDistance(settings.userLocation || settings.selectedArea, a.storeLocation || a.store).km;
-    const distB = calculateDistance(settings.userLocation || settings.selectedArea, b.storeLocation || b.store).km;
+    const distA = calculateDistance(settings.userLocation || settings.selectedArea, a.storeLocation || a.store, userCity, a.storeCity).km;
+    const distB = calculateDistance(settings.userLocation || settings.selectedArea, b.storeLocation || b.store, userCity, b.storeCity).km;
     return distA - distB;
   });
 
@@ -3292,7 +3360,7 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
                 <span>Stores in {settings.userCity} within {settings.searchRadiusKm} km</span>
                 <button
                   type="button"
-                  onClick={() => setCityModalOpen(true)}
+                  onClick={() => onOpenSettings?.("location")}
                   className="text-[11px] font-bold text-[#00897B] dark:text-[#2DD4BF] hover:underline cursor-pointer ml-1"
                 >
                   Change City / Radius
@@ -3303,7 +3371,7 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
                 <span>Set your city to filter stores in your city.</span>
                 <button
                   type="button"
-                  onClick={() => setCityModalOpen(true)}
+                  onClick={() => onOpenSettings?.("location")}
                   className="px-2.5 py-0.5 rounded-md bg-[#00897B] hover:bg-[#00796B] text-white text-[11px] font-bold cursor-pointer"
                 >
                   📍 Set City
@@ -3371,7 +3439,7 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
           </div>
           <button
             type="button"
-            onClick={() => setCityModalOpen(true)}
+            onClick={() => onOpenSettings?.("location")}
             className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 cursor-pointer shadow-xs inline-flex items-center gap-1.5"
           >
             <MapPin className="h-3.5 w-3.5" /> Set City
@@ -3965,18 +4033,6 @@ function NgoAvailableFood({ onAction }: { onAction: (message: string, kind?: Toa
           onClose={() => setSelectedReceipt(null)}
         />
       )}
-
-      {/* Area & City Selector Modal */}
-      {cityModalOpen && (
-        <AreaSelectorModal
-          isOpen={cityModalOpen}
-          onClose={() => setCityModalOpen(false)}
-          onSelected={() => {
-            setSettings(loadSettings());
-            onAction("Location and city settings updated!");
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -4364,11 +4420,16 @@ function ProductRoute() {
   const [location] = useLocation();
   const role: AppWorkspaceRole = location.startsWith("/ngo") ? "ngo" : "supermarket";
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [locationOpen, setLocationOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("profile");
   const [toast, setToast] = useState<ToastState>(null);
   const notify = (message: string, kind: ToastKind = "success") => {
     setToast({ message, kind });
     window.setTimeout(() => setToast(null), 3000);
+  };
+
+  const openSettings = (tab: SettingsTab = "profile") => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
   };
 
   const type = location.split("/").filter(Boolean).slice(1).join("/") || "overview";
@@ -4376,7 +4437,7 @@ function ProductRoute() {
   const renderPage = () => {
     if (role === "supermarket") {
       if (type === "overview") return <DashboardHome onAction={notify} />;
-      if (type === "inventory") return <InventoryPage onAction={notify} />;
+      if (type === "inventory") return <InventoryPage onAction={notify} onOpenSettings={openSettings} />;
       if (type === "detection") return <DetectionPage onAction={notify} />;
       if (type === "surplus") return <SurplusPage onAction={notify} />;
       if (type === "verification") return <VerificationPage onAction={notify} />;
@@ -4387,14 +4448,14 @@ function ProductRoute() {
     }
 
     if (role === "ngo") {
-      if (type === "overview") return <NgoOverview onAction={notify} />;
-      if (type === "available-food" || type === "browse") return <NgoAvailableFood onAction={notify} />;
+      if (type === "overview") return <NgoOverview onAction={notify} onOpenSettings={openSettings} />;
+      if (type === "available-food" || type === "browse") return <NgoAvailableFood onAction={notify} onOpenSettings={openSettings} />;
       if (type === "history" || type === "my-orders") return <NgoHistory />;
       if (type === "active" || type === "my-pickups") return <NgoActivePasses />;
       if (type === "map") return <LiveMapView />;
       if (type === "impact") return <ImpactPage />;
       if (type === "notifications") return <NotificationsPage />;
-      return <NgoOverview onAction={notify} />;
+      return <NgoOverview onAction={notify} onOpenSettings={openSettings} />;
     }
 
     return <DashboardHome onAction={notify} />;
@@ -4402,10 +4463,10 @@ function ProductRoute() {
 
   return (
     <div className="ss-shell flex min-h-[100dvh]">
-      <Sidebar role={role} path={location} onNavigate={() => setToast(null)} onOpenSettings={() => setSettingsOpen(true)} />
+      <Sidebar role={role} path={location} onNavigate={() => setToast(null)} onOpenSettings={() => openSettings("profile")} />
       <div className="min-w-0 flex-1 flex flex-col">
-        <MobileNav role={role} path={location} onNavigate={() => setToast(null)} onOpenSettings={() => setSettingsOpen(true)} />
-        <Topbar role={role} path={location} onOpenLocation={() => setLocationOpen(true)} />
+        <MobileNav role={role} path={location} onNavigate={() => setToast(null)} onOpenSettings={() => openSettings("profile")} />
+        <Topbar role={role} path={location} onOpenLocation={() => openSettings("location")} />
         <main className="flex-1 px-6 py-8 lg:px-10">
           {renderPage()}
         </main>
@@ -4415,11 +4476,7 @@ function ProductRoute() {
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSaved={msg => notify(msg)}
-      />
-      <AreaSelectorModal
-        isOpen={locationOpen}
-        onClose={() => setLocationOpen(false)}
-        onSelected={(area, radius) => notify(`Location set to ${area} (${radius} km radius)`)}
+        initialTab={settingsTab}
       />
     </div>
   );

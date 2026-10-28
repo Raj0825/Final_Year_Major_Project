@@ -1,7 +1,7 @@
 // LiveMapView.tsx - Interactive Leaflet map for FreshRescue
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { MapPin, Navigation, RefreshCw, Filter, Store, AlertTriangle, X, ZoomIn, ZoomOut, Clock3, Leaf, Package } from 'lucide-react';
-import { loadInventory, loadStores, loadSettings, calculateDistance } from '@/data/mockStore';
+import { loadInventory, loadStores, loadSettings, calculateDistance, isSameCity, resolveCoordinates } from '@/data/mockStore';
 
 function injectLeafletCSS() {
   if (document.getElementById('leaflet-css')) return;
@@ -11,17 +11,6 @@ function injectLeafletCSS() {
   link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
   document.head.appendChild(link);
 }
-
-function deterministicCoords(seed: string, baseLat: number, baseLng: number) {
-  let h1 = 0, h2 = 0;
-  for (let i = 0; i < seed.length; i++) {
-    h1 = (Math.imul(31, h1) + seed.charCodeAt(i)) | 0;
-    h2 = (Math.imul(37, h2) + seed.charCodeAt(i)) | 0;
-  }
-  return { lat: baseLat + ((Math.abs(h1) % 80) - 40) / 1000, lng: baseLng + ((Math.abs(h2) % 80) - 40) / 1000 };
-}
-
-const DC = { lat: 28.6139, lng: 77.209 };
 
 export default function LiveMapView() {
   const mapRef = useRef<HTMLDivElement | null>(null);
@@ -52,18 +41,32 @@ export default function LiveMapView() {
     };
   }, []);
 
+  const userCity = (settings.userCity || settings.storeCity || '').trim();
+  const cityCenter = resolveCoordinates(userCity, settings.userLocation || settings.selectedArea);
   const norm = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace('kirna', 'kirana');
-  const storePins = stores.map(store => {
+
+  // Filter stores strictly by user city (user in City A cannot see stores in City B)
+  const cityStores = stores.filter(store => {
+    if (!userCity) return true;
+    return isSameCity(userCity, store.city);
+  });
+
+  const storePins = cityStores.map(store => {
     const items = inventory.filter(i => {
+      if (userCity && i.storeCity && !isSameCity(userCity, i.storeCity)) return false;
       if (i.store && store.name) {
         return norm(i.store) === norm(store.name);
       }
       return Boolean(i.storeId && store.id && i.storeId === store.id);
     });
     const urgentCount = items.filter(i => i.expiryHoursLeft <= 24 || i.status === 'Expiring soon').length;
-    const centre = userPos || DC;
-    const coords = deterministicCoords(store.id + store.name, centre.lat, centre.lng);
-    const dist = calculateDistance(settings.userCity || 'Delhi', store.area || store.city || '');
+    const coords = resolveCoordinates(store.city || userCity, store.area, store.location);
+    const dist = calculateDistance(
+      settings.userLocation || settings.selectedArea,
+      store.location || store.area,
+      userCity,
+      store.city
+    );
     return { store, items, urgentCount, ...coords, distanceKm: dist.km };
   });
 
@@ -75,10 +78,11 @@ export default function LiveMapView() {
   });
 
   useEffect(() => {
-    const total = inventory.reduce((s, i) => s + i.available, 0);
-    const urgent = inventory.filter(i => i.expiryHoursLeft <= 24 || i.status === 'Expiring soon').length;
+    const cityItems = inventory.filter(i => !userCity || !i.storeCity || isSameCity(userCity, i.storeCity));
+    const total = cityItems.reduce((s, i) => s + i.available, 0);
+    const urgent = cityItems.filter(i => i.expiryHoursLeft <= 24 || i.status === 'Expiring soon').length;
     setStats({ total, urgent, sw: storePins.filter(p => p.items.length > 0).length });
-  }, [inventory, stores]);
+  }, [inventory, stores, userCity]);
 
   const fetchGPS = useCallback(() => {
     if (!navigator.geolocation) { setGpsError('Geolocation not supported.'); return; }
@@ -98,7 +102,7 @@ export default function LiveMapView() {
       if (cancelled) return;
       const L = mod.default || mod;
       if (lmRef.current) { lmRef.current.remove(); lmRef.current = null; }
-      const c = userPos || DC;
+      const c = userPos || cityCenter;
       if (!mapRef.current) return;
       const map = L.map(mapRef.current, { center: [c.lat, c.lng], zoom: 13, zoomControl: false });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap', maxZoom: 19 }).addTo(map);
@@ -106,7 +110,7 @@ export default function LiveMapView() {
       setMapReady(true);
     });
     return () => { cancelled = true; if (lmRef.current) { lmRef.current.remove(); lmRef.current = null; } setMapReady(false); };
-  }, []);
+  }, [userCity]);
 
   useEffect(() => { if (lmRef.current && userPos) lmRef.current.flyTo([userPos.lat, userPos.lng], 14, { animate: true, duration: 1 }); }, [userPos]);
 
@@ -118,7 +122,7 @@ export default function LiveMapView() {
       mksRef.current.forEach(m => m.remove()); mksRef.current = [];
       if (radRef.current) { radRef.current.remove(); radRef.current = null; }
       if (uMkRef.current) { uMkRef.current.remove(); uMkRef.current = null; }
-      const c = userPos || DC;
+      const c = userPos || cityCenter;
       const uIcon = L.divIcon({ html: '<div style="width:18px;height:18px;border-radius:50%;background:#4F46E5;border:3px solid #fff;box-shadow:0 0 0 4px rgba(79,70,229,0.3);"></div>', className: '', iconSize: [18,18], iconAnchor: [9,9] });
       uMkRef.current = L.marker([c.lat, c.lng], { icon: uIcon }).addTo(map).bindPopup('<b>You are here</b>');
       if (settings.searchRadiusKm > 0) {

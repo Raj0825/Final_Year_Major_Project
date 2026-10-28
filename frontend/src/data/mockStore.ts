@@ -244,29 +244,298 @@ export function setCurrentUserEmail(email: string) {
   } catch {}
 })();
 
-// Distance Calculation Utility
-export function calculateDistance(userLocOrArea: string, storeLocOrArea: string): { km: number; display: string } {
-  if (!userLocOrArea || !storeLocOrArea) {
-    return { km: 1.2, display: "1.2 km" };
-  }
-  const u = userLocOrArea.trim().toLowerCase();
-  const s = storeLocOrArea.trim().toLowerCase();
+// Geographic and Distance Calculation Engine (Haversine Algorithm & Multi-City Boundary)
 
-  // If identical or one contains the other
-  if (u === s || u.includes(s) || s.includes(u)) {
-    return { km: 0.6, display: "0.6 km" };
+export interface LatLng {
+  lat: number;
+  lng: number;
+}
+
+// Known coordinates for Indian cities
+export const CITY_COORDINATES: Record<string, LatLng> = {
+  solapur: { lat: 17.6599, lng: 75.9064 },
+  sholapur: { lat: 17.6599, lng: 75.9064 },
+  pune: { lat: 18.5204, lng: 73.8567 },
+  mumbai: { lat: 19.0760, lng: 72.8777 },
+  bombay: { lat: 19.0760, lng: 72.8777 },
+  delhi: { lat: 28.6139, lng: 77.2090 },
+  "new delhi": { lat: 28.6139, lng: 77.2090 },
+  bangalore: { lat: 12.9716, lng: 77.5946 },
+  bengaluru: { lat: 12.9716, lng: 77.5946 },
+  hyderabad: { lat: 17.3850, lng: 78.4867 },
+  chennai: { lat: 13.0827, lng: 80.2707 },
+  madras: { lat: 13.0827, lng: 80.2707 },
+  kolkata: { lat: 22.5726, lng: 88.3639 },
+  calcutta: { lat: 22.5726, lng: 88.3639 },
+  ahmedabad: { lat: 23.0225, lng: 72.5714 },
+  surat: { lat: 21.1702, lng: 72.8311 },
+  jaipur: { lat: 26.9124, lng: 75.7873 },
+  lucknow: { lat: 26.8467, lng: 80.9462 },
+  nagpur: { lat: 21.1458, lng: 79.0882 },
+  nashik: { lat: 19.9975, lng: 73.7898 },
+  aurangabad: { lat: 19.8762, lng: 75.3433 },
+  "chhatrapati sambhajinagar": { lat: 19.8762, lng: 75.3433 },
+  kolhapur: { lat: 16.7050, lng: 74.2433 },
+  chandigarh: { lat: 30.7333, lng: 76.7794 },
+  indore: { lat: 22.7196, lng: 75.8577 },
+  bhopal: { lat: 23.2599, lng: 77.4126 },
+  noida: { lat: 28.5355, lng: 77.3910 },
+  gurgaon: { lat: 28.4595, lng: 77.0266 },
+  gurugram: { lat: 28.4595, lng: 77.0266 },
+  navi_mumbai: { lat: 19.0330, lng: 73.0297 },
+  thane: { lat: 19.2183, lng: 72.9781 }
+};
+
+// Known coordinates for popular neighborhoods and landmarks
+export const AREA_COORDINATES: Record<string, LatLng> = {
+  // Solapur areas
+  "ashok chowk": { lat: 17.6650, lng: 75.9120 },
+  "ashok chowk solapur": { lat: 17.6650, lng: 75.9120 },
+  "ashowk chowk": { lat: 17.6650, lng: 75.9120 },
+  "navi peth": { lat: 17.6710, lng: 75.9010 },
+  "jule solapur": { lat: 17.6420, lng: 75.9180 },
+  "saat rasta": { lat: 17.6610, lng: 75.9030 },
+  "market yard solapur": { lat: 17.6750, lng: 75.9200 },
+  "hotgi road": { lat: 17.6320, lng: 75.9280 },
+  "solapur station": { lat: 17.6695, lng: 75.9040 },
+
+  // Pune areas
+  kothrud: { lat: 18.5074, lng: 73.8077 },
+  "shivaji nagar": { lat: 18.5314, lng: 73.8446 },
+  "viman nagar": { lat: 18.5679, lng: 73.9143 },
+  hinjewadi: { lat: 18.5913, lng: 73.7389 },
+  baner: { lat: 18.5590, lng: 73.7868 },
+  hadapsar: { lat: 18.5089, lng: 73.9260 },
+  camp: { lat: 18.5170, lng: 73.8780 },
+  swargate: { lat: 18.5018, lng: 73.8586 },
+  deccan: { lat: 18.5174, lng: 73.8415 },
+  magarpatta: { lat: 18.5158, lng: 73.9272 },
+  wakad: { lat: 18.5987, lng: 73.7660 },
+  pimpri: { lat: 18.6279, lng: 73.7997 },
+  chinchwad: { lat: 18.6445, lng: 73.8000 },
+  "paud road": { lat: 18.5080, lng: 73.8010 },
+  "central market": { lat: 18.5180, lng: 73.8540 },
+
+  // Mumbai areas
+  andheri: { lat: 19.1136, lng: 72.8697 },
+  bandra: { lat: 19.0596, lng: 72.8295 },
+  dadar: { lat: 19.0178, lng: 72.8478 },
+  colaba: { lat: 18.9067, lng: 72.8147 },
+  borivali: { lat: 19.2307, lng: 72.8567 },
+  juhu: { lat: 19.1075, lng: 72.8263 },
+  powai: { lat: 19.1176, lng: 72.9060 },
+  kurla: { lat: 19.0726, lng: 72.8845 },
+  malad: { lat: 19.1874, lng: 72.8484 },
+
+  // Delhi areas
+  "connaught place": { lat: 28.6315, lng: 77.2167 },
+  "south extension": { lat: 28.5714, lng: 77.2215 },
+  "karol bagh": { lat: 28.6514, lng: 77.1907 },
+  rohini: { lat: 28.7495, lng: 77.0565 },
+  "hauz khas": { lat: 28.5494, lng: 77.2001 },
+  dwarka: { lat: 28.5921, lng: 77.0460 },
+  "chandni chowk": { lat: 28.6506, lng: 77.2303 },
+  "lajpat nagar": { lat: 28.5700, lng: 77.2400 },
+
+  // Bangalore areas
+  koramangala: { lat: 12.9352, lng: 77.6245 },
+  indiranagar: { lat: 12.9784, lng: 77.6408 },
+  "hsr layout": { lat: 12.9121, lng: 77.6446 },
+  whitefield: { lat: 12.9698, lng: 77.7500 },
+  jayanagar: { lat: 12.9308, lng: 77.5838 },
+  "electronic city": { lat: 12.8452, lng: 77.6602 },
+  malleswaram: { lat: 13.0031, lng: 77.5643 },
+  "mg road": { lat: 12.9756, lng: 77.6066 },
+  "btm layout": { lat: 12.9166, lng: 77.6101 }
+};
+
+/**
+ * Normalizes city name and checks equality with support for common aliases.
+ */
+export function isSameCity(city1?: string, city2?: string): boolean {
+  if (!city1 || !city2) return false;
+  const c1 = city1.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const c2 = city2.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!c1 || !c2) return false;
+  if (c1 === c2) return true;
+
+  const aliases: Record<string, string[]> = {
+    bengaluru: ["bangalore"],
+    bangalore: ["bengaluru"],
+    mumbai: ["bombay"],
+    bombay: ["mumbai"],
+    kolkata: ["calcutta"],
+    calcutta: ["kolkata"],
+    chennai: ["madras"],
+    madras: ["chennai"],
+    gurugram: ["gurgaon"],
+    gurgaon: ["gurugram"],
+    solapur: ["sholapur"],
+    sholapur: ["solapur"],
+    delhi: ["newdelhi"],
+    newdelhi: ["delhi"]
+  };
+
+  if (aliases[c1]?.includes(c2) || aliases[c2]?.includes(c1)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Mathematical Haversine Distance Formula.
+ * Calculates Great-Circle distance between two latitude/longitude points on Earth.
+ * Returns distance in kilometers (rounded to 1 decimal place).
+ */
+export function haversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Earth's mean radius in kilometers
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const d = R * c;
+  return Math.round(d * 10) / 10;
+}
+
+/**
+ * Resolves geographical coordinates for a city, area, or address.
+ * Uses exact GPS if provided, or resolves from known database with deterministic sub-city offsets.
+ */
+export function resolveCoordinates(
+  city?: string,
+  area?: string,
+  address?: string,
+  directCoords?: { lat?: number; lng?: number }
+): LatLng {
+  if (directCoords && typeof directCoords.lat === "number" && typeof directCoords.lng === "number" && !isNaN(directCoords.lat)) {
+    return { lat: directCoords.lat, lng: directCoords.lng };
   }
 
-  // Hash-based deterministic distance for consistent display between locations
-  let hash = 0;
-  const combined = `${u}::${s}`;
-  for (let i = 0; i < combined.length; i++) {
-    hash = (hash << 5) - hash + combined.charCodeAt(i);
-    hash |= 0;
+  const cleanArea = (area || "").trim().toLowerCase();
+  const cleanAddr = (address || "").trim().toLowerCase();
+  const cleanCity = (city || "").trim().toLowerCase().replace(/[^a-z0-9 ]/g, "");
+
+  // 1. Direct Area Match
+  for (const [key, coords] of Object.entries(AREA_COORDINATES)) {
+    if (cleanArea === key || cleanAddr.includes(key) || cleanArea.includes(key)) {
+      return coords;
+    }
   }
-  const kmVal = Math.max(0.4, (Math.abs(hash) % 48) / 10 + 0.4);
+
+  // 2. City Center Match
+  let baseCoords: LatLng | null = null;
+  for (const [key, coords] of Object.entries(CITY_COORDINATES)) {
+    if (cleanCity === key || cleanCity.includes(key) || key.includes(cleanCity)) {
+      baseCoords = coords;
+      break;
+    }
+  }
+
+  if (!baseCoords) {
+    // Default base for unknown city: deterministic center so distances within this city make sense
+    let cityHash = 0;
+    const s = cleanCity || "default_city";
+    for (let i = 0; i < s.length; i++) {
+      cityHash = (cityHash << 5) - cityHash + s.charCodeAt(i);
+      cityHash |= 0;
+    }
+    const latOffset = ((Math.abs(cityHash) % 1000) - 500) / 100;
+    const lngOffset = ((Math.abs(cityHash >> 3) % 1000) - 500) / 100;
+    baseCoords = { lat: 20.5937 + latOffset, lng: 78.9629 + lngOffset };
+  }
+
+  // Apply deterministic micro-offset for neighborhood/street within the city (0.4 km - 3.5 km radius)
+  let subHash = 0;
+  const subStr = `${cleanArea}::${cleanAddr}`;
+  for (let i = 0; i < subStr.length; i++) {
+    subHash = (subHash << 5) - subHash + subStr.charCodeAt(i);
+    subHash |= 0;
+  }
+  const deltaLat = ((Math.abs(subHash) % 40) - 20) / 1000; // ~1-2 km
+  const deltaLng = ((Math.abs(subHash >> 2) % 40) - 20) / 1000;
+
+  return {
+    lat: baseCoords.lat + deltaLat,
+    lng: baseCoords.lng + deltaLng
+  };
+}
+
+export interface DistanceResult {
+  km: number;
+  display: string;
+  sameCity: boolean;
+}
+
+/**
+ * Robust Distance Calculation Algorithm.
+ * 1. Checks City Boundary: If user and store are in different cities, returns sameCity = false and Infinity km.
+ * 2. Uses Haversine Formula for exact geographic distance calculation within the same city.
+ */
+export function calculateDistance(
+  userLocOrArea: string,
+  storeLocOrArea: string,
+  userCity?: string,
+  storeCity?: string,
+  userDirectCoords?: { lat?: number; lng?: number },
+  storeDirectCoords?: { lat?: number; lng?: number }
+): DistanceResult {
+  // Try extracting cities from user settings or store cache if not passed directly
+  let effectiveUserCity = (userCity || "").trim();
+  let effectiveStoreCity = (storeCity || "").trim();
+
+  if (!effectiveUserCity) {
+    try {
+      const s = loadSettings();
+      effectiveUserCity = (s.userCity || s.storeCity || "").trim();
+    } catch {}
+  }
+
+  if (!effectiveStoreCity) {
+    try {
+      const stores = loadStores();
+      const norm = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const storeNorm = norm(storeLocOrArea || "");
+      const matched = stores.find(st => norm(st.name) === storeNorm || norm(st.location).includes(storeNorm));
+      if (matched?.city) effectiveStoreCity = matched.city;
+    } catch {}
+  }
+
+  // Multi-City Isolation Check: If both cities are present and do not match, hide/infinite
+  if (effectiveUserCity && effectiveStoreCity && !isSameCity(effectiveUserCity, effectiveStoreCity)) {
+    return {
+      km: Infinity,
+      display: "Different City",
+      sameCity: false
+    };
+  }
+
+  const u = (userLocOrArea || "").trim().toLowerCase();
+  const s = (storeLocOrArea || "").trim().toLowerCase();
+
+  // If exact match or one contains the other
+  if (u && s && (u === s || u.includes(s) || s.includes(u))) {
+    return { km: 0.6, display: "0.6 km", sameCity: true };
+  }
+
+  // Resolve coordinates
+  const userCoords = resolveCoordinates(effectiveUserCity, userLocOrArea, userLocOrArea, userDirectCoords);
+  const storeCoords = resolveCoordinates(effectiveStoreCity, storeLocOrArea, storeLocOrArea, storeDirectCoords);
+
+  // Compute Haversine distance
+  const rawDist = haversineDistanceKm(userCoords.lat, userCoords.lng, storeCoords.lat, storeCoords.lng);
+  const kmVal = Math.max(0.4, rawDist);
   const rounded = Math.round(kmVal * 10) / 10;
-  return { km: rounded, display: `${rounded} km` };
+
+  return {
+    km: rounded,
+    display: `${rounded} km`,
+    sameCity: true
+  };
 }
 
 // Stores Management
@@ -363,6 +632,38 @@ export function upsertStore(data: Partial<RegisteredStore> & { name: string; loc
   }
 
   saveStores(nextStores);
+
+  // Keep inventory items listed by this store in sync with updated location, area, and city
+  try {
+    const rawInv = localStorage.getItem(STORAGE_KEYS.INVENTORY);
+    if (rawInv) {
+      const items: InventoryItem[] = JSON.parse(rawInv);
+      if (Array.isArray(items)) {
+        let changed = false;
+        const updated = items.map(it => {
+          if (it.storeId === targetId || norm(it.store || "") === cleanNorm) {
+            changed = true;
+            return {
+              ...it,
+              store: cleanName,
+              storeLocation: updatedRecord.location,
+              storeArea: updatedRecord.area,
+              storeCity: updatedRecord.city
+            };
+          }
+          return it;
+        });
+        if (changed) {
+          localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(updated));
+          window.dispatchEvent(new Event("ss_inventory_updated"));
+          if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
+            api.put("/cloud-sync/inventory/sync", updated).catch(() => {});
+          }
+        }
+      }
+    }
+  } catch {}
+
   return updatedRecord;
 }
 

@@ -1,18 +1,28 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { X, User, Bell, Sliders, Shield, Check, RotateCcw, Store, MapPin, Navigation, Loader2, ExternalLink } from "lucide-react";
 import { loadSettings, saveSettings, UserSettings, upsertStore, clearAllData } from "@/data/mockStore";
+
+export type SettingsTab = "profile" | "location" | "operations" | "notifications" | "system";
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSaved: (msg: string) => void;
+  initialTab?: SettingsTab;
 }
 
-export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, onSaved, initialTab = "profile" }: SettingsModalProps) {
   if (!isOpen) return null;
 
   const [settings, setSettings] = useState<UserSettings>(loadSettings);
-  const [activeTab, setActiveTab] = useState<"profile" | "location" | "operations" | "notifications" | "system">("profile");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+
+  useEffect(() => {
+    setSettings(loadSettings());
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -182,6 +192,12 @@ export function SettingsModal({ isOpen, onClose, onSaved }: SettingsModalProps) 
 
           {activeTab === "location" && (
             <div className="space-y-3.5 ss-reveal">
+              <div className="p-3 rounded-xl bg-[#FAF8F5] dark:bg-[#192220] border border-[#EAE6DF] dark:border-[#2D3835] text-xs text-[#554F4A] dark:text-[#CBD5E1] flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-[#00897B] dark:text-[#2DD4BF] shrink-0" />
+                <span>
+                  <strong>Permanent Location:</strong> Set at registration. You can update your {settings.role === "supermarket" ? "store location, area, and city" : "home address, neighborhood area, and city"} here anytime.
+                </span>
+              </div>
               {settings.role === "supermarket" ? (
                 <>
                   <div>
