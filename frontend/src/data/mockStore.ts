@@ -416,13 +416,36 @@ export function saveInventory(items: InventoryItem[]) {
 }
 
 // Orders Management
+export function deduplicateOrders(orders: StoreOrder[]): StoreOrder[] {
+  const map = new Map<string, StoreOrder>();
+  for (const o of orders) {
+    if (!o || !o.id) continue;
+    const existing = map.get(o.id);
+    if (!existing) {
+      map.set(o.id, o);
+    } else {
+      const status = (o.status === "FULFILLED" || existing.status === "FULFILLED")
+        ? "FULFILLED"
+        : (o.status === "CANCELLED" || existing.status === "CANCELLED" ? "CANCELLED" : "RESERVED");
+      map.set(o.id, { ...existing, ...o, status });
+    }
+  }
+  return Array.from(map.values());
+}
+
 export function loadOrders(): StoreOrder[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.ORDERS);
     if (raw) {
       const parsed: StoreOrder[] = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed.filter(o => !["ord-101", "ord-102", "ord-103"].includes(o.id));
+        const cleaned = parsed.filter(o => !["ord-101", "ord-102", "ord-103"].includes(o.id));
+        const deduplicated = deduplicateOrders(cleaned);
+        // Automatically clean up accumulated duplicate entries from storage
+        if (deduplicated.length !== parsed.length) {
+          localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(deduplicated));
+        }
+        return deduplicated;
       }
     }
   } catch {}
@@ -445,7 +468,8 @@ export function loadMyOrders(customerEmail?: string): StoreOrder[] {
 
 export function saveOrders(orders: StoreOrder[]) {
   try {
-    localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
+    const deduplicated = deduplicateOrders(orders);
+    localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(deduplicated));
     window.dispatchEvent(new Event("ss_orders_updated"));
   } catch {}
   if (orders.length > 0 && typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
@@ -704,20 +728,35 @@ export async function syncFromCloud(): Promise<void> {
 
     if (orderRes.status === "fulfilled" && Array.isArray(orderRes.value.data)) {
       const cloudOrders = orderRes.value.data;
-      const currentEmail = getCurrentUserEmail();
       const currentOrders = loadOrders();
 
-      if (currentEmail) {
-        // Retain orders from other users, and synchronize current user's orders with cloud
-        const otherOrders = currentOrders.filter(
-          o => !o.customerEmail || o.customerEmail.toLowerCase().trim() !== currentEmail
-        );
-        const merged = [...cloudOrders, ...otherOrders];
-        localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(merged));
-      } else if (cloudOrders.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(cloudOrders));
+      // Deduplicate orders by unique order ID across cloud and local storage
+      const orderMap = new Map<string, StoreOrder>();
+
+      // 1. Add all existing local orders
+      for (const o of currentOrders) {
+        if (o && o.id) {
+          orderMap.set(o.id, o);
+        }
       }
-      window.dispatchEvent(new Event("ss_orders_updated"));
+
+      // 2. Merge cloud orders, updating status or adding new orders
+      for (const co of cloudOrders) {
+        if (co && co.id) {
+          const local = orderMap.get(co.id);
+          orderMap.set(co.id, local ? { ...local, ...co } : co);
+        }
+      }
+
+      const deduplicated = Array.from(orderMap.values());
+      const currentRaw = localStorage.getItem(STORAGE_KEYS.ORDERS);
+      const nextRaw = JSON.stringify(deduplicated);
+
+      // ONLY save and dispatch if the data actually changed!
+      if (currentRaw !== nextRaw) {
+        localStorage.setItem(STORAGE_KEYS.ORDERS, nextRaw);
+        window.dispatchEvent(new Event("ss_orders_updated"));
+      }
     }
   } catch {
     // Cloud sync offline or waking up

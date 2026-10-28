@@ -25,7 +25,7 @@ import {
   loadInventory, saveInventory, loadOrders, saveOrders, loadNotifications,
   saveNotifications, loadSettings, saveSettings, addReservation,
   fulfillPickupOrder, cancelPickupOrder, loadStores, saveStores, upsertStore,
-  calculateDistance, clearAllData, setCurrentUserEmail, isItemForStore, loadMyOrders, isOrderForCustomer, InventoryItem, StoreOrder,
+  calculateDistance, clearAllData, setCurrentUserEmail, isItemForStore, loadMyOrders, isOrderForCustomer, deduplicateOrders, InventoryItem, StoreOrder,
   AppNotification, UserSettings, RegisteredStore, DEFAULT_SETTINGS
 } from "@/data/mockStore";
 
@@ -842,10 +842,10 @@ function DashboardHome({ onAction }: { onAction: (message: string) => void }) {
   const urgentItems = myInventory.filter(i => i.status === "Expiring soon" || i.flagged || i.expiryHoursLeft <= 6);
   const currentStoreName = (settings.storeName || "").trim().toLowerCase();
   const currentStoreId = (settings.storeId || "").trim();
-  const myOrders = orders.filter(o =>
+  const myOrders = deduplicateOrders(orders.filter(o =>
     (currentStoreId && o.storeId && o.storeId === currentStoreId) ||
     (currentStoreName && o.storeName && o.storeName.trim().toLowerCase() === currentStoreName)
-  );
+  ));
   const pendingOrders = myOrders.filter(o => o.status === "RESERVED");
   const totalReservedKg = pendingOrders.reduce((acc, o) => acc + o.quantity, 0);
 
@@ -2174,10 +2174,10 @@ function SurplusPage({ onAction }: { onAction: (message: string) => void }) {
 
   const currentStoreName = (settings.storeName || "").trim().toLowerCase();
   const currentStoreId = (settings.storeId || "").trim();
-  const myOrders = orders.filter(o =>
+  const myOrders = deduplicateOrders(orders.filter(o =>
     (currentStoreId && o.storeId && o.storeId === currentStoreId) ||
     (currentStoreName && o.storeName && o.storeName.trim().toLowerCase() === currentStoreName)
-  );
+  ));
   const totalAvailable = surplusItems.reduce((acc, curr) => acc + curr.available, 0);
   const totalReserved = myOrders.filter(o => o.status === "RESERVED").reduce((acc, curr) => acc + curr.quantity, 0);
   const totalRemaining = Math.max(0, totalAvailable - totalReserved);
@@ -2397,10 +2397,10 @@ function VerificationPage({ onAction }: { onAction: (message: string, kind?: Toa
 
   const currentStoreName = (settings.storeName || "").trim().toLowerCase();
   const currentStoreId = (settings.storeId || "").trim();
-  const myOrders = orders.filter(o =>
+  const myOrders = deduplicateOrders(orders.filter(o =>
     (currentStoreId && o.storeId && o.storeId === currentStoreId) ||
     (currentStoreName && o.storeName && o.storeName.trim().toLowerCase() === currentStoreName)
-  );
+  ));
   const pendingOrders = myOrders.filter(o => o.status === "RESERVED");
   const fulfilledOrders = myOrders.filter(o => o.status === "FULFILLED");
 
