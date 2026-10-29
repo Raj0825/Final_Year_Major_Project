@@ -18,6 +18,7 @@ import org.springframework.data.mongodb.core.query.NearQuery;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 
 @Slf4j
@@ -127,27 +128,20 @@ public class ListingService {
                     .near(nearQuery)
                     .all();
 
-            List<Listing> nearby = results.getContent().stream()
+            return results.getContent().stream()
                     .map(org.springframework.data.geo.GeoResult::getContent)
+                    .filter(l -> l.getQuantityAvailable() > 0)
                     .toList();
-
-            if (!nearby.isEmpty()) {
-                return nearby;
-            }
         } catch (Exception e) {
-            log.warn("GeoNear query error, falling back to all active listings: {}", e.getMessage());
+            log.error("GeoNear query error in findNearby(lon={}, lat={}, radius={}): {}", longitude, latitude, radiusKm, e.getMessage(), e);
+            return Collections.emptyList();
         }
-        // Fallback so the customer feed never shows an error
-        return listingRepository.findAll();
     }
 
     public List<Listing> findUrgent() {
-        List<Listing> urgent = listingRepository.findByUrgentTrue();
-        if (urgent.isEmpty()) {
-            // If no urgent tier 3 items, return all listings so buyer still sees deals
-            return listingRepository.findAll();
-        }
-        return urgent;
+        return listingRepository.findByUrgentTrue().stream()
+                .filter(l -> l.getQuantityAvailable() > 0)
+                .toList();
     }
 
     public List<Listing> findAll() {

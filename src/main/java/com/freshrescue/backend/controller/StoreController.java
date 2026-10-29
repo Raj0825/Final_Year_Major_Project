@@ -2,6 +2,7 @@ package com.freshrescue.backend.controller;
 
 import com.freshrescue.backend.entity.*;
 import com.freshrescue.backend.repository.*;
+import com.freshrescue.backend.security.StoreAuthorizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.mongodb.core.geo.GeoJsonPoint;
 import org.springframework.http.ResponseEntity;
@@ -24,20 +25,21 @@ public class StoreController {
     private final BatchRepository batchRepository;
     private final ListingRepository listingRepository;
     private final OrderRepository orderRepository;
+    private final StoreAuthorizationService storeAuthorizationService;
 
     public record CreateStoreRequest(
             String name,
             String address,
             String phone,
             Double latitude,
-            Double longitude
-    ) {}
+            Double longitude) {
+    }
 
     public record ReviewRequest(
             int rating,
             String comment,
-            String orderId
-    ) {}
+            String orderId) {
+    }
 
     public record StoreAnalytics(
             String storeId,
@@ -50,8 +52,8 @@ public class StoreController {
             long fulfilledOrders,
             double revenueRescued,
             double wastePreventedKg,
-            Map<String, Long> batchStateDistribution
-    ) {}
+            Map<String, Long> batchStateDistribution) {
+    }
 
     @PostMapping
     @PreAuthorize("hasRole('STORE_MANAGER')")
@@ -124,8 +126,7 @@ public class StoreController {
     public ResponseEntity<Review> postReview(
             @PathVariable String id,
             @RequestBody ReviewRequest req,
-            Authentication auth
-    ) {
+            Authentication auth) {
         String reviewerId = auth.getName();
         String reviewerName = userRepository.findById(reviewerId)
                 .map(User::getName)
@@ -160,46 +161,16 @@ public class StoreController {
     @GetMapping("/{id}/analytics")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public ResponseEntity<StoreAnalytics> getAnalytics(@PathVariable String id, Authentication auth) {
-        String storeId = id;
-        if ("me".equalsIgnoreCase(id)) {
-            String staffStoreId = (String) auth.getDetails();
-            if (staffStoreId != null && !staffStoreId.isBlank()) {
-                storeId = staffStoreId;
-            } else {
-                List<Store> stores = storeRepository.findByManagerId(auth.getName());
-                if (!stores.isEmpty()) {
-                    storeId = stores.get(0).getId();
-                }
-            }
-        }
+        String storeId = "me".equalsIgnoreCase(id) ? null : id;
+        String verifiedStoreId = storeAuthorizationService.resolveAndVerifyStore(auth, storeId);
 
-        final String finalStoreId = storeId;
-
-        // Verify caller has access to this store
-        String userId = auth.getName();
-        String staffStoreId = (String) auth.getDetails();
-        boolean authorized = (staffStoreId != null && staffStoreId.equalsIgnoreCase(finalStoreId));
-        if (!authorized) {
-            User user = userRepository.findById(userId).orElse(null);
-            if (user != null && user.getStoreId() != null && user.getStoreId().equalsIgnoreCase(finalStoreId)) {
-                authorized = true;
-            }
-        }
-        if (!authorized) {
-            authorized = storeRepository.findByManagerId(userId).stream()
-                    .anyMatch(s -> s.getId().equalsIgnoreCase(finalStoreId) || (s.getName() != null && s.getName().equalsIgnoreCase(finalStoreId)));
-        }
-        if (!authorized) {
-            throw new AccessDeniedException("You do not have access to this store's analytics.");
-        }
-
-        String storeName = storeRepository.findById(finalStoreId)
+        String storeName = storeRepository.findById(verifiedStoreId)
                 .map(Store::getName)
-                .orElse("Store " + finalStoreId);
+                .orElse("Store " + verifiedStoreId);
 
-        List<Batch> batches = batchRepository.findByStoreId(finalStoreId);
-        List<Listing> listings = listingRepository.findByStoreId(finalStoreId);
-        List<Order> orders = orderRepository.findByStoreId(finalStoreId);
+        List<Batch> batches = batchRepository.findByStoreId(verifiedStoreId);
+        List<Listing> listings = listingRepository.findByStoreId(verifiedStoreId);
+        List<Order> orders = orderRepository.findByStoreId(verifiedStoreId);
 
         long totalBatches = batches.size();
         long activeBatches = batches.stream().filter(b -> b.getState() != Batch.BatchState.EXPIRED).count();
@@ -225,7 +196,7 @@ public class StoreController {
         }
 
         StoreAnalytics analytics = new StoreAnalytics(
-                finalStoreId,
+                verifiedStoreId,
                 storeName,
                 totalBatches,
                 activeBatches,
@@ -235,8 +206,7 @@ public class StoreController {
                 fulfilledOrders,
                 Math.round(revenueRescued * 100.0) / 100.0,
                 Math.round(wastePreventedKg * 10.0) / 10.0,
-                distribution
-        );
+                distribution);
 
         return ResponseEntity.ok(analytics);
     }

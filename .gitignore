@@ -1,4 +1,4 @@
-# Maven
+# Maven & Build
 target/
 *.class
 
@@ -7,14 +7,15 @@ node_modules/
 dist/
 .vite/
 
-# Python
+# Python & Machine Learning models
 __pycache__/
 *.py[cod]
 *$py.class
 venv/
+*.h5
 .env
 
-# IDEs
+# IDEs & Editor metadata
 .idea/
 *.iml
 .vscode/

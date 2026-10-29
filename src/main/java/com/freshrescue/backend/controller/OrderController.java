@@ -2,13 +2,11 @@ package com.freshrescue.backend.controller;
 
 import com.freshrescue.backend.entity.Batch;
 import com.freshrescue.backend.entity.Order;
-import com.freshrescue.backend.entity.Store;
 import com.freshrescue.backend.entity.User;
 import com.freshrescue.backend.repository.BatchRepository;
 import com.freshrescue.backend.repository.ListingRepository;
 import com.freshrescue.backend.repository.OrderRepository;
-import com.freshrescue.backend.repository.StoreRepository;
-import com.freshrescue.backend.repository.UserRepository;
+import com.freshrescue.backend.security.StoreAuthorizationService;
 import com.freshrescue.backend.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
@@ -27,10 +25,9 @@ public class OrderController {
 
     private final OrderService orderService;
     private final OrderRepository orderRepository;
-    private final UserRepository userRepository;
-    private final StoreRepository storeRepository;
     private final BatchRepository batchRepository;
     private final ListingRepository listingRepository;
+    private final StoreAuthorizationService storeAuthService;
 
     public record ReserveRequest(String listingId, double quantity) {
     }
@@ -55,24 +52,29 @@ public class OrderController {
 
     /**
      * Store Manager view: all active pending reservations awaiting customer pickup,
-     * sorted newest first.
+     * sorted newest first. Uses indexed repository queries without findAll().
      */
     @GetMapping("/store/pending")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public List<Order> getPendingStoreOrders(Authentication auth) {
         String userId = auth.getName();
-        Set<String> myStoreIds = getManagerStoreIds(userId, (String) auth.getDetails());
+        Set<String> myStoreIds = storeAuthService.getAuthorizedStoreIds(auth);
         Set<String> myBatchIds = getManagerBatchIds(userId, myStoreIds);
 
         if (myStoreIds.isEmpty() && myBatchIds.isEmpty()) {
             return Collections.emptyList();
         }
 
-        List<Order> allOrders = orderRepository.findAll();
-        List<Order> pending = allOrders.stream()
+        Map<String, Order> orderMap = new HashMap<>();
+        if (!myStoreIds.isEmpty()) {
+            orderRepository.findByStoreIdIn(myStoreIds).forEach(o -> orderMap.put(o.getId(), o));
+        }
+        if (!myBatchIds.isEmpty()) {
+            orderRepository.findByBatchIdIn(myBatchIds).forEach(o -> orderMap.put(o.getId(), o));
+        }
+
+        List<Order> pending = orderMap.values().stream()
                 .filter(o -> o.getStatus() == Order.OrderStatus.RESERVED)
-                .filter(o -> (o.getStoreId() != null && myStoreIds.contains(o.getStoreId()))
-                        || (o.getBatchId() != null && myBatchIds.contains(o.getBatchId())))
                 .sorted((a, b) -> {
                     Instant t1 = b.getReservedAt() != null ? b.getReservedAt() : Instant.EPOCH;
                     Instant t2 = a.getReservedAt() != null ? a.getReservedAt() : Instant.EPOCH;
@@ -87,9 +89,7 @@ public class OrderController {
     @GetMapping("/store/{storeId}")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public List<Order> getStoreOrders(@PathVariable String storeId, Authentication auth) {
-        String userId = auth.getName();
-        Set<String> myStoreIds = getManagerStoreIds(userId, (String) auth.getDetails());
-        boolean authorized = myStoreIds.stream().anyMatch(id -> id.equalsIgnoreCase(storeId.trim()));
+        boolean authorized = storeAuthService.isAuthorizedForStore(auth, storeId);
         if (!authorized) {
             throw new AccessDeniedException("You do not have access to this store's orders.");
         }
@@ -102,17 +102,22 @@ public class OrderController {
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public List<Order> getMyStoreOrders(Authentication auth) {
         String userId = auth.getName();
-        Set<String> myStoreIds = getManagerStoreIds(userId, (String) auth.getDetails());
+        Set<String> myStoreIds = storeAuthService.getAuthorizedStoreIds(auth);
         Set<String> myBatchIds = getManagerBatchIds(userId, myStoreIds);
 
         if (myStoreIds.isEmpty() && myBatchIds.isEmpty()) {
             return Collections.emptyList();
         }
 
-        List<Order> allOrders = orderRepository.findAll();
-        List<Order> filtered = allOrders.stream()
-                .filter(o -> (o.getStoreId() != null && myStoreIds.contains(o.getStoreId()))
-                        || (o.getBatchId() != null && myBatchIds.contains(o.getBatchId())))
+        Map<String, Order> orderMap = new HashMap<>();
+        if (!myStoreIds.isEmpty()) {
+            orderRepository.findByStoreIdIn(myStoreIds).forEach(o -> orderMap.put(o.getId(), o));
+        }
+        if (!myBatchIds.isEmpty()) {
+            orderRepository.findByBatchIdIn(myBatchIds).forEach(o -> orderMap.put(o.getId(), o));
+        }
+
+        List<Order> filtered = orderMap.values().stream()
                 .sorted((a, b) -> {
                     Instant t1 = b.getReservedAt() != null ? b.getReservedAt() : Instant.EPOCH;
                     Instant t2 = a.getReservedAt() != null ? a.getReservedAt() : Instant.EPOCH;
@@ -136,7 +141,7 @@ public class OrderController {
     @PostMapping("/fulfill-code")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public Order fulfillByCode(@RequestBody FulfillCodeRequest request, Authentication auth) {
-        String staffStoreId = resolveStaffStoreId(auth);
+        String staffStoreId = storeAuthService.resolveAndVerifyStore(auth, null);
         return orderService.fulfillByCodeOrId(request.code(), staffStoreId);
     }
 
@@ -144,48 +149,21 @@ public class OrderController {
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public Order fulfill(@PathVariable String id, @RequestBody(required = false) FulfillRequest request,
             Authentication auth) {
-        String staffStoreId = resolveStaffStoreId(auth);
+        String staffStoreId = storeAuthService.resolveAndVerifyStore(auth, null);
         String code = (request != null && request.qrCode() != null && !request.qrCode().isBlank()) ? request.qrCode()
                 : id;
         return orderService.fulfillByCodeOrId(code, staffStoreId);
     }
 
-    private String resolveStaffStoreId(Authentication auth) {
-        String staffStoreId = (String) auth.getDetails();
-        if (staffStoreId != null && !staffStoreId.isBlank()) {
-            return staffStoreId.trim();
-        }
-        Set<String> storeIds = getManagerStoreIds(auth.getName(), null);
-        if (!storeIds.isEmpty()) {
-            return storeIds.iterator().next();
-        }
-        return null;
-    }
-
-    private Set<String> getManagerStoreIds(String userId, String detailsStoreId) {
-        Set<String> storeIds = new HashSet<>();
-        if (detailsStoreId != null && !detailsStoreId.isBlank())
-            storeIds.add(detailsStoreId.trim());
-        User user = userRepository.findById(userId).orElse(null);
-        if (user != null && user.getStoreId() != null && !user.getStoreId().isBlank()) {
-            storeIds.add(user.getStoreId().trim());
-        }
-        List<Store> stores = storeRepository.findByManagerId(userId);
-        for (Store s : stores) {
-            storeIds.add(s.getId());
-        }
-        return storeIds;
-    }
-
     private Set<String> getManagerBatchIds(String userId, Set<String> storeIds) {
-        if (storeIds.isEmpty()) {
-            return Collections.emptySet();
+        Set<String> batchIds = new HashSet<>();
+        if (storeIds != null && !storeIds.isEmpty()) {
+            batchRepository.findByStoreIdIn(storeIds).forEach(b -> batchIds.add(b.getId()));
         }
-        return batchRepository.findAll().stream()
-                .filter(b -> (b.getManagerId() != null && b.getManagerId().equals(userId))
-                        || (b.getStoreId() != null && storeIds.contains(b.getStoreId())))
-                .map(Batch::getId)
-                .collect(Collectors.toSet());
+        if (userId != null && !userId.isBlank()) {
+            batchRepository.findByManagerId(userId).forEach(b -> batchIds.add(b.getId()));
+        }
+        return batchIds;
     }
 
     private void enrichOrdersWithProductNames(List<Order> orders) {

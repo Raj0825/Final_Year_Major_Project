@@ -72,10 +72,18 @@ public class OrderService {
         }
 
         if (resolvedBatchId != null) {
-            Query batchQuery = Query.query(Criteria.where("id").is(resolvedBatchId));
-            Update batchUpdate = new Update().inc("quantityReserved", quantity);
-            mongoTemplate.updateFirst(batchQuery, batchUpdate, com.freshrescue.backend.entity.Batch.class);
-            log.info("Incremented quantityReserved by {} on batch {}", quantity, resolvedBatchId);
+            try {
+                Query batchQuery = Query.query(Criteria.where("id").is(resolvedBatchId));
+                Update batchUpdate = new Update().inc("quantityReserved", quantity);
+                mongoTemplate.updateFirst(batchQuery, batchUpdate, com.freshrescue.backend.entity.Batch.class);
+                log.info("Incremented quantityReserved by {} on batch {}", quantity, resolvedBatchId);
+            } catch (Exception ex) {
+                // Roll back listing stock decrement if batch update fails
+                Query rbQuery = Query.query(Criteria.where("id").is(listingId));
+                Update rbUpdate = new Update().inc("quantityAvailable", quantity);
+                mongoTemplate.updateFirst(rbQuery, rbUpdate, Listing.class);
+                throw ex;
+            }
         }
 
         Instant now = Instant.now();
@@ -95,7 +103,20 @@ public class OrderService {
                 .holdExpiresAt(now.plus(holdMinutes, ChronoUnit.MINUTES))
                 .build();
 
-        return orderRepository.save(order);
+        try {
+            return orderRepository.save(order);
+        } catch (Exception ex) {
+            // Roll back listing decrement and batch reservation on order save failure
+            Query rbQuery = Query.query(Criteria.where("id").is(listingId));
+            Update rbUpdate = new Update().inc("quantityAvailable", quantity);
+            mongoTemplate.updateFirst(rbQuery, rbUpdate, Listing.class);
+            if (resolvedBatchId != null) {
+                Query bQuery = Query.query(Criteria.where("id").is(resolvedBatchId));
+                Update bUpdate = new Update().inc("quantityReserved", -quantity);
+                mongoTemplate.updateFirst(bQuery, bUpdate, com.freshrescue.backend.entity.Batch.class);
+            }
+            throw ex;
+        }
     }
 
     public Order fulfillByCodeOrId(String code, String staffStoreId) {
@@ -174,22 +195,28 @@ public class OrderService {
             fulfilled.setBatchId(targetBatchId);
             final String finalBatchId = targetBatchId;
             final double orderQuantity = fulfilled.getQuantity();
-            batchRepository.findById(finalBatchId).ifPresent(batch -> {
-                double oldQuantity = batch.getQuantity();
-                double newQuantity = Math.max(0.0, batch.getQuantity() - orderQuantity);
-                double newReserved = Math.max(0.0, batch.getQuantityReserved() - orderQuantity);
-                batch.setQuantity(Math.round(newQuantity * 100.0) / 100.0);
-                batch.setQuantityReserved(Math.round(newReserved * 100.0) / 100.0);
-                batch.setUpdatedAt(Instant.now());
-                Batch updatedBatch = batchRepository.save(batch);
 
-                log.info("Batch {} inventory reduced after fulfillment: {} -> {} (reserved remaining: {})",
-                        finalBatchId, oldQuantity, updatedBatch.getQuantity(), updatedBatch.getQuantityReserved());
+            // Atomic decrements for batch stock and reservation counter
+            Query bQuery = Query.query(Criteria.where("id").is(finalBatchId));
+            Update bUpdate = new Update()
+                    .inc("quantity", -orderQuantity)
+                    .inc("quantityReserved", -orderQuantity)
+                    .set("updatedAt", Instant.now());
+            mongoTemplate.updateFirst(bQuery, bUpdate, com.freshrescue.backend.entity.Batch.class);
 
-                // Sync listing with remaining available stock
+            // Clamp so counters never go negative
+            Update clampUpdate = new Update()
+                    .max("quantity", 0.0)
+                    .max("quantityReserved", 0.0);
+            mongoTemplate.updateFirst(bQuery, clampUpdate, com.freshrescue.backend.entity.Batch.class);
+
+            // Reload and sync listing
+            batchRepository.findById(finalBatchId).ifPresent(updatedBatch -> {
+                log.info("Batch {} inventory reduced after fulfillment (quantity: {}, reserved: {})",
+                        finalBatchId, updatedBatch.getQuantity(), updatedBatch.getQuantityReserved());
                 listingService.syncListingForBatch(updatedBatch);
             });
-            return orderRepository.save(fulfilled);
+            return fulfilled;
         } else {
             log.warn("Could not determine batchId for fulfilled order {}", fulfilled.getId());
         }
@@ -243,6 +270,8 @@ public class OrderService {
             Query batchQuery = Query.query(Criteria.where("id").is(batchId));
             Update batchUpdate = new Update().inc("quantityReserved", -matchedOrder.getQuantity());
             mongoTemplate.updateFirst(batchQuery, batchUpdate, com.freshrescue.backend.entity.Batch.class);
+            Update clampUpdate = new Update().max("quantityReserved", 0.0);
+            mongoTemplate.updateFirst(batchQuery, clampUpdate, com.freshrescue.backend.entity.Batch.class);
             batchRepository.findById(batchId).ifPresent(listingService::syncListingForBatch);
         } else if (matchedOrder.getListingId() != null) {
             listingRepository.findById(matchedOrder.getListingId()).ifPresent(l -> {

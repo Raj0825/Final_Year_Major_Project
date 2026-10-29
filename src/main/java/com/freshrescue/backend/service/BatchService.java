@@ -42,9 +42,7 @@ public class BatchService {
             batch.setUpdatedAt(Instant.now());
         }
         Batch saved = batchRepository.save(batch);
-        if (saved.getState() != Batch.BatchState.FRESH && saved.getState() != Batch.BatchState.EXPIRED) {
-            listingService.syncListingForBatch(saved);
-        }
+        listingService.syncListingForBatch(saved);
         return saved;
     }
 

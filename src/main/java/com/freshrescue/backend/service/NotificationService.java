@@ -12,68 +12,89 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
-/**
- * Finds buyers (NGO + CUSTOMER users) near a store whose preferences match a
- * batch's
- * category, and creates in-app Notification records for them.
- *
- * NOTE: this is intentionally simple for the MVP (loads all buyers, filters in
- * memory).
- * Once user volume matters, replace the filtering with a proper geo +
- * preference query
- * (similar to ListingService.findNearby) rather than scanning every user.
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class NotificationService {
 
-        private final NotificationRepository notificationRepository;
-        private final UserRepository userRepository;
-        private final ListingRepository listingRepository;
+    private final NotificationRepository notificationRepository;
+    private final UserRepository userRepository;
+    private final ListingRepository listingRepository;
 
-        public void notifyNearbyBuyersOfDeal(Batch batch) {
-                Listing listing = listingRepository.findByBatchId(batch.getId());
-                if (listing == null) {
-                        // syncListingForBatch() should always run before this is called (see
-                        // BatchService,
-                        // DiscountEngineService), but guard anyway rather than send notifications that
-                        // deep-link to a listing that doesn't exist.
-                        log.warn("No listing found for batch {} - skipping notifications", batch.getId());
-                        return;
-                }
-
-                List<User> candidates = userRepository.findAll().stream()
-                                .filter(u -> u.getRole() == User.Role.NGO || u.getRole() == User.Role.CUSTOMER)
-                                .filter(u -> u.getPreferredCategories() == null
-                                                || u.getPreferredCategories().isEmpty()
-                                                || u.getPreferredCategories().contains(batch.getCategory()))
-                                .toList();
-
-                String message = "%s now %d%% off nearby".formatted(
-                                batch.getProductName(),
-                                batch.getCurrentDiscountPercent() == null ? 0 : batch.getCurrentDiscountPercent());
-
-                Notification.NotificationType type = batch.getState() == Batch.BatchState.TIER_3
-                                ? Notification.NotificationType.URGENT
-                                : Notification.NotificationType.NEW_DISCOUNT;
-
-                List<Notification> notifications = candidates.stream()
-                                .map(u -> Notification.builder()
-                                                .userId(u.getId())
-                                                .listingId(listing.getId())
-                                                .type(type)
-                                                .message(message)
-                                                .createdAt(Instant.now())
-                                                .build())
-                                .toList();
-
-                notificationRepository.saveAll(notifications);
-                log.info("Queued {} notification(s) for batch {}", notifications.size(), batch.getId());
-
-                // TODO: wire up actual push delivery (FCM/APNs or web push) - this only
-                // persists in-app notification records for now.
+    public void notifyNearbyBuyersOfDeal(Batch batch) {
+        Listing listing = listingRepository.findByBatchId(batch.getId());
+        if (listing == null) {
+            log.warn("No listing found for batch {} - skipping notifications", batch.getId());
+            return;
         }
+
+        Notification.NotificationType type = batch.getState() == Batch.BatchState.TIER_3
+                ? Notification.NotificationType.URGENT
+                : Notification.NotificationType.NEW_DISCOUNT;
+
+        Instant cutoff24h = Instant.now().minus(24, ChronoUnit.HOURS);
+
+        // 1. Fetch only buyer roles via repository query (no findAll())
+        List<User> buyers = userRepository.findByRoleIn(List.of(User.Role.NGO, User.Role.CUSTOMER));
+
+        List<User> candidates = buyers.stream()
+                // Preference match
+                .filter(u -> u.getPreferredCategories() == null
+                        || u.getPreferredCategories().isEmpty()
+                        || u.getPreferredCategories().contains(batch.getCategory()))
+                // Location / Haversine distance check when both user and store have location
+                .filter(u -> {
+                    if (u.getLocation() != null && listing.getStoreLocation() != null) {
+                        double userLat = u.getLocation().getY();
+                        double userLon = u.getLocation().getX();
+                        double storeLat = listing.getStoreLocation().getY();
+                        double storeLon = listing.getStoreLocation().getX();
+                        double distKm = haversineKm(userLat, userLon, storeLat, storeLon);
+                        double maxRadius = (u.getNotificationRadiusKm() != null && u.getNotificationRadiusKm() > 0)
+                                ? u.getNotificationRadiusKm()
+                                : 10.0;
+                        return distKm <= maxRadius;
+                    }
+                    return true;
+                })
+                // Skip users who already received the same listing/type notification in last 24h
+                .filter(u -> !notificationRepository.existsByUserIdAndListingIdAndTypeAndCreatedAtAfter(
+                        u.getId(), listing.getId(), type, cutoff24h))
+                .toList();
+
+        if (candidates.isEmpty()) {
+            log.info("No matching buyer candidates found for batch {}", batch.getId());
+            return;
+        }
+
+        String message = "%s now %d%% off nearby".formatted(
+                batch.getProductName(),
+                batch.getCurrentDiscountPercent() == null ? 0 : batch.getCurrentDiscountPercent());
+
+        List<Notification> notifications = candidates.stream()
+                .map(u -> Notification.builder()
+                        .userId(u.getId())
+                        .listingId(listing.getId())
+                        .type(type)
+                        .message(message)
+                        .createdAt(Instant.now())
+                        .build())
+                .toList();
+
+        notificationRepository.saveAll(notifications);
+        log.info("Queued {} notification(s) for batch {}", notifications.size(), batch.getId());
+    }
+
+    private double haversineKm(double lat1, double lon1, double lat2, double lon2) {
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return 6371.0 * c;
+    }
 }

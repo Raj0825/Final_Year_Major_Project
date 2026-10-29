@@ -573,7 +573,13 @@ export function saveStores(stores: RegisteredStore[]) {
     window.dispatchEvent(new Event("ss_stores_updated"));
   } catch {}
   if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
-    api.put("/cloud-sync/stores/sync", stores).catch(() => {});
+    const settings = loadSettings();
+    if (settings.role === "supermarket" && settings.storeId && settings.storeId !== "store-default") {
+      const myStores = stores.filter(s => s.id === settings.storeId);
+      if (myStores.length > 0) {
+        api.put("/cloud-sync/stores/sync", myStores).catch(() => {});
+      }
+    }
   }
 }
 
@@ -657,7 +663,10 @@ export function upsertStore(data: Partial<RegisteredStore> & { name: string; loc
           localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(updated));
           window.dispatchEvent(new Event("ss_inventory_updated"));
           if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
-            api.put("/cloud-sync/inventory/sync", updated).catch(() => {});
+            const myItems = updated.filter(i => i.storeId === targetId);
+            if (myItems.length > 0) {
+              api.put("/cloud-sync/inventory/sync", myItems).catch(() => {});
+            }
           }
         }
       }
@@ -710,9 +719,15 @@ export function saveInventory(items: InventoryItem[]) {
     window.dispatchEvent(new Event("ss_inventory_updated"));
   } catch {}
   if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
-    api.put("/cloud-sync/inventory/sync", items).catch(() => {
-      api.post("/cloud-sync/inventory/batch", items).catch(() => {});
-    });
+    const settings = loadSettings();
+    if (settings.role === "supermarket" && settings.storeId && settings.storeId !== "store-default") {
+      const myItems = items.filter(i => i.storeId === settings.storeId);
+      if (myItems.length > 0) {
+        api.put("/cloud-sync/inventory/sync", myItems).catch(() => {
+          api.post("/cloud-sync/inventory/batch", myItems).catch(() => {});
+        });
+      }
+    }
   }
 }
 
@@ -720,15 +735,18 @@ export function saveInventory(items: InventoryItem[]) {
 export function deduplicateOrders(orders: StoreOrder[]): StoreOrder[] {
   const map = new Map<string, StoreOrder>();
   for (const o of orders) {
-    if (!o || !o.id) continue;
-    const existing = map.get(o.id);
+    if (!o) continue;
+    // Deduplicate by unique pickup QR pass code first, fallback to order ID
+    const key = (o.qrCode && o.qrCode.trim()) ? `qr_${o.qrCode.trim().toUpperCase()}` : o.id;
+    if (!key) continue;
+    const existing = map.get(key);
     if (!existing) {
-      map.set(o.id, o);
+      map.set(key, o);
     } else {
       const status = (o.status === "FULFILLED" || existing.status === "FULFILLED")
         ? "FULFILLED"
         : (o.status === "CANCELLED" || existing.status === "CANCELLED" ? "CANCELLED" : "RESERVED");
-      map.set(o.id, { ...existing, ...o, status });
+      map.set(key, { ...existing, ...o, status });
     }
   }
   return Array.from(map.values());
@@ -773,9 +791,6 @@ export function saveOrders(orders: StoreOrder[]) {
     localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(deduplicated));
     window.dispatchEvent(new Event("ss_orders_updated"));
   } catch {}
-  if (orders.length > 0 && typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
-    api.post("/cloud-sync/orders", orders[0]).catch(() => {});
-  }
 }
 
 // Notifications Management
@@ -872,8 +887,11 @@ export function addReservation(
 
   const updatedOrders = [newOrder, ...currentOrders];
   saveOrders(updatedOrders);
+  if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
+    api.post("/cloud-sync/orders", newOrder).catch(() => {});
+  }
 
-  // Update item available quantity in inventory
+  // Update item available quantity in inventory locally and atomically in cloud
   const inventory = loadInventory();
   const updatedInv = inventory.map(inv => {
     if (inv.id === item.id) {
@@ -886,7 +904,15 @@ export function addReservation(
     }
     return inv;
   });
-  saveInventory(updatedInv);
+  try {
+    localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(updatedInv));
+    window.dispatchEvent(new Event("ss_inventory_updated"));
+  } catch {}
+
+  // Atomic cloud reservation decrement (does not push entire inventory)
+  if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
+    api.post(`/cloud-sync/inventory/${item.id}/reserve?quantity=${qty}`).catch(() => {});
+  }
 
   // Push notification
   const notifs = loadNotifications();
@@ -955,7 +981,7 @@ export function cancelPickupOrder(orderId: string): boolean {
   const updatedOrders = orders.map(o => o.id === orderId ? { ...o, status: "CANCELLED" as const } : o);
   saveOrders(updatedOrders);
 
-  // Restore inventory
+  // Restore inventory locally
   const inventory = loadInventory();
   const updatedInv = inventory.map(inv => {
     if (inv.id === found.listingId) {
@@ -963,8 +989,14 @@ export function cancelPickupOrder(orderId: string): boolean {
     }
     return inv;
   });
-  saveInventory(updatedInv);
+  try {
+    localStorage.setItem(STORAGE_KEYS.INVENTORY, JSON.stringify(updatedInv));
+    window.dispatchEvent(new Event("ss_inventory_updated"));
+  } catch {}
+
+  // Atomic cloud release and order cancel status
   if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
+    api.post(`/cloud-sync/inventory/${found.listingId}/release?quantity=${found.quantity}`).catch(() => {});
     api.patch(`/cloud-sync/orders/${orderId}/status?status=CANCELLED`).catch(() => {});
   }
 

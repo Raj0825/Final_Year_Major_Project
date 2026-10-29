@@ -87,11 +87,28 @@ public class AuthService {
             throw new BadCredentialsException("Invalid email or password");
         }
 
-        // If user is STORE_MANAGER but has no storeId in DB, check StoreRepository
+        // If user is STORE_MANAGER but has no storeId in DB, link first store or create one upfront
         if (user.getRole() == User.Role.STORE_MANAGER && (user.getStoreId() == null || user.getStoreId().isBlank())) {
             var stores = storeRepository.findByManagerId(user.getId());
             if (!stores.isEmpty()) {
                 user.setStoreId(stores.get(0).getId());
+                user = userRepository.save(user);
+            } else {
+                String storeName = (user.getName() != null && !user.getName().isBlank())
+                        ? user.getName().trim() + " Store"
+                        : "My Store";
+                Store store = Store.builder()
+                        .name(storeName)
+                        .managerId(user.getId())
+                        .address("")
+                        .phone("")
+                        .location(null)
+                        .averageRating(0.0)
+                        .reviewCount(0)
+                        .createdAt(Instant.now())
+                        .build();
+                Store savedStore = storeRepository.save(store);
+                user.setStoreId(savedStore.getId());
                 user = userRepository.save(user);
             }
         }

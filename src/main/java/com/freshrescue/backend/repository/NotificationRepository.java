@@ -3,9 +3,11 @@ package com.freshrescue.backend.repository;
 import com.freshrescue.backend.entity.Notification;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
+import java.time.Instant;
 import java.util.List;
 
 public interface NotificationRepository extends MongoRepository<Notification, String> {
     List<Notification> findByUserIdOrderByCreatedAtDesc(String userId);
     long countByUserIdAndReadFalse(String userId);
+    boolean existsByUserIdAndListingIdAndTypeAndCreatedAtAfter(String userId, String listingId, Notification.NotificationType type, Instant cutoff);
 }

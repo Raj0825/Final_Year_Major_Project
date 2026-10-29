@@ -4,6 +4,7 @@ import com.freshrescue.backend.entity.CloudOrder;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -12,4 +13,5 @@ public interface CloudOrderRepository extends MongoRepository<CloudOrder, String
     List<CloudOrder> findByCustomerNameIgnoreCase(String customerName);
     List<CloudOrder> findByCustomerEmailIgnoreCase(String customerEmail);
     List<CloudOrder> findByStoreId(String storeId);
+    List<CloudOrder> findByStoreIdIn(Collection<String> storeIds);
 }

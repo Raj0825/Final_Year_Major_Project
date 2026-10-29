@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "description": "FreshRescue - Food rescue platform monorepo.",
   "scripts": {
+    "start": "npm run frontend",
     "frontend": "npm run dev --prefix frontend",
-    "backend": "mvnw spring-boot:run",
-    "dev": "concurrently --kill-others-on-fail --names \"BACKEND,FRONTEND\" --prefix-colors \"cyan,green\" \"npm run backend\" \"npm run frontend\"",
+    "backend": "mvn spring-boot:run",
+    "dev": "npx concurrently --kill-others-on-fail --names \"BACKEND,FRONTEND\" --prefix-colors \"cyan,green\" \"npm run backend\" \"npm run frontend\"",
     "install:frontend": "npm install --prefix frontend",
     "build:frontend": "npm run build --prefix frontend"
   },

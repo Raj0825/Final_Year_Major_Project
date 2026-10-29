@@ -4,6 +4,7 @@ import com.freshrescue.backend.entity.Order;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -12,6 +13,8 @@ public interface OrderRepository extends MongoRepository<Order, String> {
     List<Order> findByBuyerIdOrderByReservedAtDesc(String buyerId);
     List<Order> findByStoreId(String storeId);
     List<Order> findByStoreIdOrderByReservedAtDesc(String storeId);
+    List<Order> findByStoreIdIn(Collection<String> storeIds);
+    List<Order> findByBatchIdIn(Collection<String> batchIds);
     List<Order> findByStatusAndHoldExpiresAtBefore(Order.OrderStatus status, Instant instant);
     Optional<Order> findByQrCode(String qrCode);
 }

@@ -6,6 +6,7 @@ import com.freshrescue.backend.entity.User;
 import com.freshrescue.backend.repository.BatchRepository;
 import com.freshrescue.backend.repository.StoreRepository;
 import com.freshrescue.backend.repository.UserRepository;
+import com.freshrescue.backend.security.StoreAuthorizationService;
 import com.freshrescue.backend.service.BatchService;
 import com.freshrescue.backend.service.ListingService;
 import lombok.RequiredArgsConstructor;
@@ -23,9 +24,7 @@ import org.springframework.beans.factory.annotation.Value;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/batches")
@@ -36,6 +35,7 @@ public class BatchController {
     private final BatchRepository batchRepository;
     private final UserRepository userRepository;
     private final StoreRepository storeRepository;
+    private final StoreAuthorizationService storeAuthService;
     private final ListingService listingService;
 
     @Value("${freshness.discount.tier1-percent:20}")
@@ -54,56 +54,22 @@ public class BatchController {
             @Positive(message = "Quantity must be greater than zero") double quantity,
             @NotBlank(message = "Unit is required") String unit,
             @Positive(message = "Original price must be greater than zero") double originalPrice,
-            Instant stockedAt
-    ) {}
+            Instant stockedAt) {
+    }
 
-    public record UpdateTierRequest(Batch.BatchState state, Integer discountPercent) {}
+    public record UpdateTierRequest(Batch.BatchState state, Integer discountPercent) {
+    }
 
     /**
      * Resolves and verifies the caller's store:
-     * 1) Collects authorized store IDs from JWT claim, User profile, and StoreRepository.
-     * 2) If a requestStoreId is supplied, verifies it belongs to the caller's authorized stores.
+     * 1) Collects authorized store IDs from JWT claim, User profile, and
+     * StoreRepository.
+     * 2) If a requestStoreId is supplied, verifies it belongs to the caller's
+     * authorized stores.
      * 3) If no store is associated, throws AccessDeniedException.
      */
     private String resolveAndVerifyStore(Authentication auth, String requestStoreId) {
-        String userId = auth.getName();
-        String staffStoreId = (String) auth.getDetails();
-
-        Set<String> authorizedStoreIds = new HashSet<>();
-        if (staffStoreId != null && !staffStoreId.isBlank()) {
-            authorizedStoreIds.add(staffStoreId.trim());
-        }
-
-        User user = userRepository.findById(userId).orElse(null);
-        if (user != null && user.getStoreId() != null && !user.getStoreId().isBlank()) {
-            authorizedStoreIds.add(user.getStoreId().trim());
-        }
-
-        List<Store> stores = storeRepository.findByManagerId(userId);
-        for (Store s : stores) {
-            authorizedStoreIds.add(s.getId());
-        }
-
-        if (authorizedStoreIds.isEmpty()) {
-            throw new AccessDeniedException("No store associated with your account.");
-        }
-
-        if (requestStoreId != null && !requestStoreId.isBlank()) {
-            String cleanId = requestStoreId.trim();
-            String matched = authorizedStoreIds.stream()
-                    .filter(id -> id.equalsIgnoreCase(cleanId))
-                    .findFirst()
-                    .orElse(null);
-            if (matched == null) {
-                throw new AccessDeniedException("You do not have access to store: " + cleanId);
-            }
-            return matched;
-        }
-
-        // Return primary authorized store ID
-        if (staffStoreId != null && !staffStoreId.isBlank()) return staffStoreId.trim();
-        if (user != null && user.getStoreId() != null && !user.getStoreId().isBlank()) return user.getStoreId().trim();
-        return stores.get(0).getId();
+        return storeAuthService.resolveAndVerifyStore(auth, requestStoreId);
     }
 
     @PostMapping
@@ -130,26 +96,16 @@ public class BatchController {
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public List<Batch> getMyBatches(Authentication auth) {
         String userId = auth.getName();
-        User user = userRepository.findById(userId).orElse(null);
+        Set<String> myStoreIds = storeAuthService.getAuthorizedStoreIds(auth);
 
-        java.util.Set<String> myStoreIds = new java.util.HashSet<>();
-        if (auth.getDetails() != null) myStoreIds.add((String) auth.getDetails());
-        if (user != null && user.getStoreId() != null) myStoreIds.add(user.getStoreId());
-        List<Store> stores = storeRepository.findByManagerId(userId);
-        for (Store s : stores) {
-            myStoreIds.add(s.getId());
+        Map<String, Batch> batchMap = new HashMap<>();
+        if (!myStoreIds.isEmpty()) {
+            batchRepository.findByStoreIdIn(myStoreIds).forEach(b -> batchMap.put(b.getId(), b));
         }
-
-        List<Batch> all = batchRepository.findAll();
-        List<Batch> result = new java.util.ArrayList<>();
-        for (Batch b : all) {
-            boolean matches = (b.getManagerId() != null && b.getManagerId().equals(userId))
-                    || (b.getStoreId() != null && myStoreIds.contains(b.getStoreId()));
-            if (matches) {
-                result.add(b);
-            }
+        if (userId != null && !userId.isBlank()) {
+            batchRepository.findByManagerId(userId).forEach(b -> batchMap.put(b.getId(), b));
         }
-        return result;
+        return new ArrayList<>(batchMap.values());
     }
 
     @GetMapping("/{id}")
@@ -209,7 +165,7 @@ public class BatchController {
     @PostMapping(value = "/{id}/scan", consumes = "multipart/form-data")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public Batch scanBatch(@PathVariable String id, @RequestParam("image") MultipartFile image,
-                           Authentication auth) throws IOException {
+            Authentication auth) throws IOException {
         Batch batch = batchService.getBatch(id);
         resolveAndVerifyStore(auth, batch.getStoreId());
         return batchService.scanBatch(id, image.getBytes(), image.getOriginalFilename());

@@ -5,7 +5,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
-@EnableScheduling // needed for the discount-tier re-evaluation job (see service/DiscountEngineService)
+@EnableScheduling
+
 public class BackendApplication {
     public static void main(String[] args) {
         SpringApplication.run(BackendApplication.class, args);

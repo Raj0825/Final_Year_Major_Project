@@ -25,7 +25,7 @@ import {
   loadInventory, saveInventory, loadOrders, saveOrders, loadNotifications,
   saveNotifications, loadSettings, saveSettings, addReservation,
   fulfillPickupOrder, cancelPickupOrder, loadStores, saveStores, upsertStore,
-  calculateDistance, isSameCity, resolveCoordinates, clearAllData, setCurrentUserEmail, isItemForStore, loadMyOrders, isOrderForCustomer, deduplicateOrders, InventoryItem, StoreOrder,
+  calculateDistance, isSameCity, resolveCoordinates, clearAllData, setCurrentUserEmail, isItemForStore, loadMyOrders, isOrderForCustomer, deduplicateOrders, syncFromCloud, InventoryItem, StoreOrder,
   AppNotification, UserSettings, RegisteredStore, DEFAULT_SETTINGS
 } from "@/data/mockStore";
 
@@ -43,7 +43,7 @@ type ToastState = { message: string; kind: ToastKind } | null;
 // Dark Mode Theme Context
 const ThemeContext = createContext<{ theme: "light" | "dark"; toggleTheme: () => void }>({
   theme: "light",
-  toggleTheme: () => {},
+  toggleTheme: () => { },
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -388,20 +388,25 @@ function Login() {
             return;
           }
 
-          // 2. On login, do not overwrite store name/location/area with defaults "My Store", "Market Main Road", "Central Market".
-          // Load the store from GET /stores/my-store and use its values; defaults are only for a first registration.
+          // Fetch latest cloud data before loading stores
+          try {
+            await syncFromCloud();
+          } catch { }
+
+          // 2. Name/location precedence:
+          // The cloud store record with id === targetStoreId first, then getMyStore(), then saved settings.
+          // Never fall back to "My Store" or "Market Main Road" on login.
+          const allStores = loadStores();
+          const cloudStore = allStores.find(s => s.id === targetStoreId);
           const serverStore = await getMyStore().catch(() => null);
 
-          const allStores = loadStores();
-          const localStore = allStores.find(s => s.id === targetStoreId);
+          storeNameVal = cloudStore?.name || serverStore?.name || (isDifferentUser ? "" : currentSettings.storeName) || "";
+          storeLocationVal = cloudStore?.location || serverStore?.address || (isDifferentUser ? "" : currentSettings.storeLocation) || "";
+          storeAreaVal = cloudStore?.area || (isDifferentUser ? "" : currentSettings.storeArea) || "";
+          storeCityVal = cloudStore?.city || (isDifferentUser ? "" : currentSettings.storeCity) || "";
+          storePhoneVal = cloudStore?.phone || serverStore?.phone || (isDifferentUser ? "" : currentSettings.storePhone) || "";
 
-          storeNameVal = serverStore?.name || localStore?.name || (isDifferentUser ? "" : currentSettings.storeName) || "";
-          storeLocationVal = serverStore?.address || localStore?.location || (isDifferentUser ? "" : currentSettings.storeLocation) || "";
-          storeAreaVal = localStore?.area || (isDifferentUser ? "" : currentSettings.storeArea) || "";
-          storeCityVal = localStore?.city || (isDifferentUser ? "" : currentSettings.storeCity) || "";
-          storePhoneVal = serverStore?.phone || localStore?.phone || (isDifferentUser ? "" : currentSettings.storePhone) || "";
-
-          // Sync local store cache with the server source of truth without placeholder defaults
+          // Sync local store cache with the cloud/server source of truth without placeholder defaults
           if (storeNameVal) {
             upsertStore({
               id: targetStoreId,
@@ -1224,18 +1229,17 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
     setLoading(true);
     try {
       const currentSettings = loadSettings();
-      const currentStoreName = currentSettings.storeName?.trim() || "My Supermarket";
-      const currentStoreLocation = currentSettings.storeLocation?.trim() || "Market Main Branch";
-      const currentStoreArea = currentSettings.storeArea?.trim() || "Central Market";
-      const currentStoreId = (currentSettings.storeId && currentSettings.storeId !== "store-default")
-        ? currentSettings.storeId
-        : `store_${Date.now()}`;
-      const effectiveCity = currentSettings.storeCity?.trim() || "Solapur";
-      const storeInitials = currentStoreName.substring(0, 2).toUpperCase() || "SM";
-
       if (!currentSettings.storeId || currentSettings.storeId === "store-default") {
-        saveSettings({ ...currentSettings, storeId: currentStoreId, storeCity: effectiveCity });
+        onAction("No store linked to this account. Please re-login.", "error");
+        setLoading(false);
+        return;
       }
+      const currentStoreId = currentSettings.storeId.trim();
+      const currentStoreName = currentSettings.storeName?.trim() || "My Store";
+      const currentStoreLocation = currentSettings.storeLocation?.trim() || "";
+      const currentStoreArea = currentSettings.storeArea?.trim() || "";
+      const effectiveCity = currentSettings.storeCity?.trim() || "";
+      const storeInitials = currentStoreName.substring(0, 2).toUpperCase() || "SM";
 
       // Calculate expiry hours from selected date
       const expiryMs = new Date(newExpiryDate).getTime() - Date.now();
@@ -1243,7 +1247,7 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
       const expiryDays = Math.ceil(expiryHoursLeft / 24);
       const expiryLabel = expiryHoursLeft <= 6 ? `${expiryHoursLeft}h left` :
         expiryHoursLeft <= 24 ? "Today" :
-        expiryDays === 1 ? "Tomorrow" : `In ${expiryDays} days`;
+          expiryDays === 1 ? "Tomorrow" : `In ${expiryDays} days`;
 
       const discPct = Math.min(Math.max(0, newDiscountPct), 90);
       const discountedPrice = discPct > 0
@@ -1252,7 +1256,7 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
 
       const freshnessScore = expiryHoursLeft > 48 ? 0.95 :
         expiryHoursLeft > 24 ? 0.75 :
-        expiryHoursLeft > 6 ? 0.55 : 0.3;
+          expiryHoursLeft > 6 ? 0.55 : 0.3;
 
       const newItem: InventoryItem = {
         id: "inv-" + Date.now(),
@@ -1394,31 +1398,28 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
       <div className="flex gap-2 border-b border-[#EAE6DF] dark:border-[#2D3835] pb-2">
         <button
           onClick={() => { setActiveTab("all"); setFlaggedOnly(false); }}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === "all"
-              ? "bg-[#2D2320] dark:bg-white text-white dark:text-[#2D2320] shadow-sm"
-              : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
-          }`}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "all"
+            ? "bg-[#2D2320] dark:bg-white text-white dark:text-[#2D2320] shadow-sm"
+            : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
+            }`}
         >
           All Inventory ({myInventory.length})
         </button>
         <button
           onClick={() => { setActiveTab("expiry"); setFlaggedOnly(false); }}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === "expiry"
-              ? "bg-[#FF6548] text-white shadow-sm"
-              : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
-          }`}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "expiry"
+            ? "bg-[#FF6548] text-white shadow-sm"
+            : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
+            }`}
         >
           <CalendarClock className="h-3.5 w-3.5" /> Expiry Watchlist ({myInventory.filter(i => i.expiryHoursLeft <= 24).length})
         </button>
         <button
           onClick={() => { setActiveTab("flagged"); setFlaggedOnly(true); }}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === "flagged"
-              ? "bg-[#00897B] text-white shadow-sm"
-              : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
-          }`}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "flagged"
+            ? "bg-[#00897B] text-white shadow-sm"
+            : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
+            }`}
         >
           <Flag className="h-3.5 w-3.5" /> Flagged for Attention ({myInventory.filter(i => i.flagged || i.status === "Expiring soon").length})
         </button>
@@ -1461,11 +1462,10 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
               onClick={() => setFilterOpen(!filterOpen)}
-              className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-                filterOpen || selectedCategory !== "All" || selectedUrgency !== "All"
-                  ? "bg-[#00897B] text-white border-[#00897B]"
-                  : "bg-white dark:bg-[#25302D] text-[#554F4A] dark:text-[#CBD5E1] border-[#EAE6DF] dark:border-[#2D3835] hover:bg-[#F8F6F1] dark:hover:bg-[#2D3835]"
-              }`}
+              className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${filterOpen || selectedCategory !== "All" || selectedUrgency !== "All"
+                ? "bg-[#00897B] text-white border-[#00897B]"
+                : "bg-white dark:bg-[#25302D] text-[#554F4A] dark:text-[#CBD5E1] border-[#EAE6DF] dark:border-[#2D3835] hover:bg-[#F8F6F1] dark:hover:bg-[#2D3835]"
+                }`}
             >
               <SlidersHorizontal className="h-3.5 w-3.5" />
               {selectedCategory !== "All" || selectedUrgency !== "All" ? `Filtered (${selectedCategory})` : "Filter"}
@@ -1491,11 +1491,10 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-all ${
-                      selectedCategory === cat
-                        ? "bg-[#2D2320] dark:bg-white text-white dark:text-[#2D2320] border-transparent"
-                        : "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#25302D] text-[#554F4A] dark:text-[#CBD5E1]"
-                    }`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-all ${selectedCategory === cat
+                      ? "bg-[#2D2320] dark:bg-white text-white dark:text-[#2D2320] border-transparent"
+                      : "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#25302D] text-[#554F4A] dark:text-[#CBD5E1]"
+                      }`}
                   >
                     {cat}
                   </button>
@@ -1515,11 +1514,10 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
                   <button
                     key={urg.id}
                     onClick={() => setSelectedUrgency(urg.id)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-all ${
-                      selectedUrgency === urg.id
-                        ? "bg-[#FF6548] text-white border-transparent"
-                        : "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#25302D] text-[#554F4A] dark:text-[#CBD5E1]"
-                    }`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-all ${selectedUrgency === urg.id
+                      ? "bg-[#FF6548] text-white border-transparent"
+                      : "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#25302D] text-[#554F4A] dark:text-[#CBD5E1]"
+                      }`}
                   >
                     {urg.label}
                   </button>
@@ -1785,7 +1783,7 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
               {newExpiryDate && (() => {
                 const hrs = Math.floor((new Date(newExpiryDate).getTime() - Date.now()) / 3600000);
                 const color = hrs <= 24 ? "bg-red-50 border-red-200 text-red-700" : hrs <= 48 ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-green-50 border-green-200 text-green-700";
-                const label = hrs <= 6 ? "⚠️ Critical — expires in under 6 hours" : hrs <= 24 ? "⏳ Expiring today — consider adding discount" : hrs <= 48 ? "📅 Expiring tomorrow" : `✅ ${Math.ceil(hrs/24)} days remaining`;
+                const label = hrs <= 6 ? "⚠️ Critical — expires in under 6 hours" : hrs <= 24 ? "⏳ Expiring today — consider adding discount" : hrs <= 48 ? "📅 Expiring tomorrow" : `✅ ${Math.ceil(hrs / 24)} days remaining`;
                 return <div className={`p-2.5 rounded-lg border text-xs font-semibold ${color}`}>{label}</div>;
               })()}
 
@@ -2082,13 +2080,12 @@ function DetectionPage({ onAction }: { onAction: (message: string, kind?: ToastK
                     <span className="text-[11px] font-bold uppercase tracking-wider text-[#00897B] dark:text-[#2DD4BF]">MobileNetV2 Classifier</span>
                     <h3 className="text-2xl font-extrabold text-[#2E221F] dark:text-[#F0F4F2] mt-0.5">{targetItem?.name || "Produce Lot"}</h3>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                    analysisResult.decayTier === "TIER_1"
-                      ? "bg-[#E6F8F3] text-[#00897B]"
-                      : analysisResult.decayTier === "TIER_2"
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${analysisResult.decayTier === "TIER_1"
+                    ? "bg-[#E6F8F3] text-[#00897B]"
+                    : analysisResult.decayTier === "TIER_2"
                       ? "bg-[#FEF3C7] text-[#D97706]"
                       : "bg-[#FEECE8] text-[#FF6548]"
-                  }`}>
+                    }`}>
                     {analysisResult.decayTier}
                   </span>
                 </div>
@@ -2465,31 +2462,28 @@ function VerificationPage({ onAction }: { onAction: (message: string, kind?: Toa
       <div className="flex gap-2 border-b border-[#EAE6DF] dark:border-[#2D3835] pb-2">
         <button
           onClick={() => setActiveTab("scanner")}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === "scanner"
-              ? "bg-[#2D2320] dark:bg-white text-white dark:text-[#2D2320] shadow-sm"
-              : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
-          }`}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "scanner"
+            ? "bg-[#2D2320] dark:bg-white text-white dark:text-[#2D2320] shadow-sm"
+            : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
+            }`}
         >
           <QrCode className="h-3.5 w-3.5" /> Counter Scanner
         </button>
         <button
           onClick={() => setActiveTab("requests")}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === "requests"
-              ? "bg-[#FF6548] text-white shadow-sm"
-              : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
-          }`}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "requests"
+            ? "bg-[#FF6548] text-white shadow-sm"
+            : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
+            }`}
         >
           <Users className="h-3.5 w-3.5" /> Customer Requests ({pendingOrders.length})
         </button>
         <button
           onClick={() => setActiveTab("pickups")}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            activeTab === "pickups"
-              ? "bg-[#00897B] text-white shadow-sm"
-              : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
-          }`}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "pickups"
+            ? "bg-[#00897B] text-white shadow-sm"
+            : "text-[#7A746E] dark:text-[#A3B2AC] hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
+            }`}
         >
           <PackageCheck className="h-3.5 w-3.5" /> Completed Pickups ({fulfilledOrders.length})
         </button>
@@ -3304,9 +3298,9 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
     const matchStore = selectedStore === "All" || normStore(item.store) === normStore(selectedStore);
     const matchFav = !favoritesOnly || favorites.some(fav => normStore(fav) === normStore(item.store));
     const matchQuery = !query.trim() ||
-                       item.name.toLowerCase().includes(query.toLowerCase()) ||
-                       item.store.toLowerCase().includes(query.toLowerCase()) ||
-                       (item.storeLocation && item.storeLocation.toLowerCase().includes(query.toLowerCase()));
+      item.name.toLowerCase().includes(query.toLowerCase()) ||
+      item.store.toLowerCase().includes(query.toLowerCase()) ||
+      (item.storeLocation && item.storeLocation.toLowerCase().includes(query.toLowerCase()));
     return matchCategory && matchStore && matchFav && matchQuery;
   }).sort((a, b) => {
     if (sortBy === "price_asc") return a.currentPrice - b.currentPrice;
@@ -3386,11 +3380,10 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
           {/* Compare Prices Toggle */}
           <button
             onClick={() => setCompareMode(prev => !prev)}
-            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              compareMode
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
-            }`}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${compareMode
+              ? "bg-indigo-600 text-white shadow-sm"
+              : "border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
+              }`}
             title="Compare the same product across different stores by price"
           >
             <ArrowUpDown className={`h-4 w-4 ${compareMode ? "text-white" : "text-indigo-500"}`} />
@@ -3400,11 +3393,10 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
           {/* Favorites Toggle */}
           <button
             onClick={() => setFavoritesOnly(prev => !prev)}
-            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              favoritesOnly
-                ? "bg-rose-500 text-white shadow-sm"
-                : "border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
-            }`}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${favoritesOnly
+              ? "bg-rose-500 text-white shadow-sm"
+              : "border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
+              }`}
             title="Filter by favorited supermarkets"
           >
             <Heart className={`h-4 w-4 ${favoritesOnly ? "fill-white text-white" : "text-rose-500"}`} />
@@ -3455,11 +3447,10 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
           </span>
           <button
             onClick={() => setSelectedStore("All")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-all cursor-pointer ${
-              selectedStore === "All"
-                ? "bg-[#00897B] text-white shadow-xs"
-                : "border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
-            }`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-all cursor-pointer ${selectedStore === "All"
+              ? "bg-[#00897B] text-white shadow-xs"
+              : "border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
+              }`}
           >
             All Stores ({cityFilteredInventory.length})
           </button>
@@ -3470,11 +3461,10 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
             return (
               <div
                 key={s.name}
-                className={`inline-flex items-center rounded-lg text-xs font-semibold shrink-0 border transition-all ${
-                  isSelected
-                    ? "bg-[#00897B] text-white border-[#00897B] shadow-xs"
-                    : "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
-                }`}
+                className={`inline-flex items-center rounded-lg text-xs font-semibold shrink-0 border transition-all ${isSelected
+                  ? "bg-[#00897B] text-white border-[#00897B] shadow-xs"
+                  : "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
+                  }`}
               >
                 <button
                   onClick={() => setSelectedStore(s.name)}
@@ -3531,11 +3521,10 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
-                selectedCategory === cat
-                  ? "bg-[#2E3735] dark:bg-white text-white dark:text-[#2E3735] shadow-sm"
-                  : "bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] border border-[#EAE6DF] dark:border-[#2D3835] hover:bg-[#F8F6F1] dark:hover:bg-[#25302D]"
-              }`}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${selectedCategory === cat
+                ? "bg-[#2E3735] dark:bg-white text-white dark:text-[#2E3735] shadow-sm"
+                : "bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] border border-[#EAE6DF] dark:border-[#2D3835] hover:bg-[#F8F6F1] dark:hover:bg-[#25302D]"
+                }`}
             >
               {cat}
             </button>
@@ -3560,11 +3549,10 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
               setQuery(chip.term);
               setCompareMode(true);
             }}
-            className={`px-3 py-1 rounded-lg border text-xs font-semibold shrink-0 transition-all cursor-pointer ${
-              query.toLowerCase() === chip.term.toLowerCase() && compareMode
-                ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
-                : "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
-            }`}
+            className={`px-3 py-1 rounded-lg border text-xs font-semibold shrink-0 transition-all cursor-pointer ${query.toLowerCase() === chip.term.toLowerCase() && compareMode
+              ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+              : "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
+              }`}
           >
             {chip.label}
           </button>
@@ -3624,17 +3612,15 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
                 return (
                   <div
                     key={item.id}
-                    className={`p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors ${
-                      isCheapest ? "bg-emerald-50/40 dark:bg-emerald-950/20" : "hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
-                    }`}
+                    className={`p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors ${isCheapest ? "bg-emerald-50/40 dark:bg-emerald-950/20" : "hover:bg-[#FAF8F5] dark:hover:bg-[#25302D]"
+                      }`}
                   >
                     <div className="flex items-start sm:items-center gap-3.5 flex-1 min-w-0">
                       {/* Rank Number */}
-                      <div className={`grid h-8 w-8 place-items-center rounded-xl text-xs font-black shrink-0 ${
-                        isCheapest
-                          ? "bg-emerald-500 text-white shadow-xs"
-                          : "bg-[#F5F5F3] dark:bg-[#25302D] text-[#7A746E] dark:text-[#A3B2AC]"
-                      }`}>
+                      <div className={`grid h-8 w-8 place-items-center rounded-xl text-xs font-black shrink-0 ${isCheapest
+                        ? "bg-emerald-500 text-white shadow-xs"
+                        : "bg-[#F5F5F3] dark:bg-[#25302D] text-[#7A746E] dark:text-[#A3B2AC]"
+                        }`}>
                         #{idx + 1}
                       </div>
 
@@ -3754,157 +3740,157 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
 
       {/* Normal Grid View — hidden when compareMode is active with a query */}
       {!(compareMode && query.trim()) && (
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {filtered.length === 0 ? (
-          <div className="col-span-full py-16 text-center ss-card p-8 bg-white dark:bg-[#1F2825]">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#F5F5F3] dark:bg-[#25302D] text-[#8A847E] dark:text-[#A3B2AC] mx-auto mb-3">
-              <Boxes className="h-6 w-6" />
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.length === 0 ? (
+            <div className="col-span-full py-16 text-center ss-card p-8 bg-white dark:bg-[#1F2825]">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#F5F5F3] dark:bg-[#25302D] text-[#8A847E] dark:text-[#A3B2AC] mx-auto mb-3">
+                <Boxes className="h-6 w-6" />
+              </div>
+              <h3 className="font-bold text-base text-[#2E221F] dark:text-[#F0F4F2]">No Surplus Food Available</h3>
+              <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-1 max-w-sm mx-auto">
+                {favoritesOnly
+                  ? "No surplus items found from your favorited supermarkets."
+                  : selectedStore !== "All"
+                    ? `No items currently listed by ${selectedStore}.`
+                    : "No surplus produce listed matching your filters. When nearby supermarkets add food batches, they will appear here live."}
+              </p>
             </div>
-            <h3 className="font-bold text-base text-[#2E221F] dark:text-[#F0F4F2]">No Surplus Food Available</h3>
-            <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-1 max-w-sm mx-auto">
-              {favoritesOnly
-                ? "No surplus items found from your favorited supermarkets."
-                : selectedStore !== "All"
-                ? `No items currently listed by ${selectedStore}.`
-                : "No surplus produce listed matching your filters. When nearby supermarkets add food batches, they will appear here live."}
-            </p>
-          </div>
-        ) : (
-          filtered.map(item => {
-            const itemDist = calculateDistance(settings.userLocation || settings.selectedArea, item.storeLocation || item.store);
-            const isFav = favorites.includes(item.store);
-            const mapsQuery = encodeURIComponent(`${item.store} ${item.storeLocation || ""}`);
-            const qtySelected = quantities[item.id] > 0 ? quantities[item.id] : 1;
+          ) : (
+            filtered.map(item => {
+              const itemDist = calculateDistance(settings.userLocation || settings.selectedArea, item.storeLocation || item.store);
+              const isFav = favorites.includes(item.store);
+              const mapsQuery = encodeURIComponent(`${item.store} ${item.storeLocation || ""}`);
+              const qtySelected = quantities[item.id] > 0 ? quantities[item.id] : 1;
 
-            return (
-              <div key={item.id} className="ss-card p-5 bg-white dark:bg-[#1F2825] space-y-3.5 flex flex-col justify-between hover:shadow-md transition-shadow">
-                <div>
-                  {/* Card Header */}
-                  <div className="flex items-start justify-between">
-                    <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#F5F5F3] dark:bg-[#25302D] text-[#7A746E] dark:text-[#A3B2AC]">
-                      <Boxes className="h-5 w-5" />
+              return (
+                <div key={item.id} className="ss-card p-5 bg-white dark:bg-[#1F2825] space-y-3.5 flex flex-col justify-between hover:shadow-md transition-shadow">
+                  <div>
+                    {/* Card Header */}
+                    <div className="flex items-start justify-between">
+                      <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#F5F5F3] dark:bg-[#25302D] text-[#7A746E] dark:text-[#A3B2AC]">
+                        <Boxes className="h-5 w-5" />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                          {Math.round(item.freshnessScore * 100)}% Fresh
+                        </span>
+                        <StatusBadge label={item.status} />
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
-                        {Math.round(item.freshnessScore * 100)}% Fresh
-                      </span>
-                      <StatusBadge label={item.status} />
+
+                    {/* Title & Store Info */}
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-bold text-base text-[#2E221F] dark:text-[#F0F4F2]">{item.name}</h3>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => toggleFavorite(item.store)}
+                            className="p-1 text-[#7A746E] hover:text-rose-500 cursor-pointer"
+                            title={isFav ? "Favorited store" : "Add store to favorites"}
+                          >
+                            <Heart className={`h-4 w-4 ${isFav ? "fill-rose-500 text-rose-500" : ""}`} />
+                          </button>
+                          <button
+                            onClick={() => setDetailItem(item)}
+                            className="p-1 text-[#7A746E] hover:text-[#00897B] dark:hover:text-[#2DD4BF] cursor-pointer"
+                            title="View Freshness Specs & Tips"
+                          >
+                            <Info className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-1 flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-[#00897B] dark:text-[#2DD4BF]">{item.store}</span>
+                        <span>•</span>
+                        <span>{item.storeLocation || item.storeArea || "Store Branch"}</span>
+                        <span>•</span>
+                        <span className="font-semibold text-[#FF6548]">{itemDist.display}</span>
+                      </p>
+                      {/* Google Maps link */}
+                      <div className="mt-1">
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${mapsQuery}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#00897B] dark:text-[#2DD4BF] hover:underline"
+                          title="View supermarket on Google Maps"
+                        >
+                          <Navigation className="h-3 w-3" />
+                          <span>Directions on Maps</span>
+                          <ExternalLink className="h-2.5 w-2.5 opacity-70" />
+                        </a>
+                      </div>
+                    </div>
+
+                    {/* Two info boxes */}
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      <div className="rounded-xl bg-[#F6F6F4] dark:bg-[#25302D] p-2.5">
+                        <p className="text-[11px] text-[#8A847E] dark:text-[#64748B]">Quantity available</p>
+                        <p className="font-bold text-xs text-[#2E221F] dark:text-[#F0F4F2] mt-0.5">{item.available} {item.unit}</p>
+                      </div>
+                      <div className="rounded-xl bg-[#F6F6F4] dark:bg-[#25302D] p-2.5">
+                        <p className="text-[11px] text-[#8A847E] dark:text-[#64748B]">Pickup deadline</p>
+                        <p className="font-bold text-xs text-[#2E221F] dark:text-[#F0F4F2] mt-0.5 flex items-center gap-1">
+                          <Clock3 className="h-3 w-3 text-amber-500" />
+                          <span>{item.pickupDeadline}</span>
+                        </p>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Title & Store Info */}
-                  <div className="mt-3">
+                  {/* Bottom Row: Price, Stepper, Add to Cart & Buy Buttons */}
+                  <div className="pt-2 flex flex-col gap-2 border-t border-[#EAE6DF]/60 dark:border-[#2D3835]">
                     <div className="flex items-center justify-between">
-                      <h3 className="font-bold text-base text-[#2E221F] dark:text-[#F0F4F2]">{item.name}</h3>
-                      <div className="flex items-center gap-1">
+                      <div>
+                        <span className="text-lg font-extrabold text-[#FF6548]">₹{item.currentPrice}</span>
+                        {item.discountPercent > 0 && (
+                          <span className="text-xs text-[#8A847E] line-through ml-1">₹{item.originalPrice}</span>
+                        )}
+                        <span className="text-[11px] text-[#8A847E]"> / {item.unit}</span>
+                      </div>
+
+                      {/* Stepper */}
+                      <div className="flex items-center border border-[#EAE6DF] dark:border-[#2D3835] rounded-lg bg-white dark:bg-[#1F2825] overflow-hidden">
                         <button
-                          onClick={() => toggleFavorite(item.store)}
-                          className="p-1 text-[#7A746E] hover:text-rose-500 cursor-pointer"
-                          title={isFav ? "Favorited store" : "Add store to favorites"}
+                          onClick={() => updateQty(item.id, -1)}
+                          className="px-2 py-1 text-xs text-[#7A746E] hover:bg-[#F5F5F3] dark:hover:bg-[#25302D] cursor-pointer"
                         >
-                          <Heart className={`h-4 w-4 ${isFav ? "fill-rose-500 text-rose-500" : ""}`} />
+                          <Minus className="h-3 w-3" />
                         </button>
+                        <span className="px-2 py-1 text-xs font-bold text-[#2E221F] dark:text-[#F0F4F2] min-w-[20px] text-center">
+                          {quantities[item.id] || 1}
+                        </span>
                         <button
-                          onClick={() => setDetailItem(item)}
-                          className="p-1 text-[#7A746E] hover:text-[#00897B] dark:hover:text-[#2DD4BF] cursor-pointer"
-                          title="View Freshness Specs & Tips"
+                          onClick={() => updateQty(item.id, 1)}
+                          className="px-2 py-1 text-xs text-[#7A746E] hover:bg-[#F5F5F3] dark:hover:bg-[#25302D] cursor-pointer"
                         >
-                          <Info className="h-4 w-4" />
+                          <Plus className="h-3 w-3" />
                         </button>
                       </div>
                     </div>
-                    <p className="text-xs text-[#7A746E] dark:text-[#A3B2AC] mt-1 flex items-center gap-1.5 flex-wrap">
-                      <span className="font-bold text-[#00897B] dark:text-[#2DD4BF]">{item.store}</span>
-                      <span>•</span>
-                      <span>{item.storeLocation || item.storeArea || "Store Branch"}</span>
-                      <span>•</span>
-                      <span className="font-semibold text-[#FF6548]">{itemDist.display}</span>
-                    </p>
-                    {/* Google Maps link */}
-                    <div className="mt-1">
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${mapsQuery}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#00897B] dark:text-[#2DD4BF] hover:underline"
-                        title="View supermarket on Google Maps"
-                      >
-                        <Navigation className="h-3 w-3" />
-                        <span>Directions on Maps</span>
-                        <ExternalLink className="h-2.5 w-2.5 opacity-70" />
-                      </a>
-                    </div>
-                  </div>
 
-                  {/* Two info boxes */}
-                  <div className="grid grid-cols-2 gap-2 mt-3">
-                    <div className="rounded-xl bg-[#F6F6F4] dark:bg-[#25302D] p-2.5">
-                      <p className="text-[11px] text-[#8A847E] dark:text-[#64748B]">Quantity available</p>
-                      <p className="font-bold text-xs text-[#2E221F] dark:text-[#F0F4F2] mt-0.5">{item.available} {item.unit}</p>
-                    </div>
-                    <div className="rounded-xl bg-[#F6F6F4] dark:bg-[#25302D] p-2.5">
-                      <p className="text-[11px] text-[#8A847E] dark:text-[#64748B]">Pickup deadline</p>
-                      <p className="font-bold text-xs text-[#2E221F] dark:text-[#F0F4F2] mt-0.5 flex items-center gap-1">
-                        <Clock3 className="h-3 w-3 text-amber-500" />
-                        <span>{item.pickupDeadline}</span>
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Bottom Row: Price, Stepper, Add to Cart & Buy Buttons */}
-                <div className="pt-2 flex flex-col gap-2 border-t border-[#EAE6DF]/60 dark:border-[#2D3835]">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-lg font-extrabold text-[#FF6548]">₹{item.currentPrice}</span>
-                      {item.discountPercent > 0 && (
-                        <span className="text-xs text-[#8A847E] line-through ml-1">₹{item.originalPrice}</span>
-                      )}
-                      <span className="text-[11px] text-[#8A847E]"> / {item.unit}</span>
-                    </div>
-
-                    {/* Stepper */}
-                    <div className="flex items-center border border-[#EAE6DF] dark:border-[#2D3835] rounded-lg bg-white dark:bg-[#1F2825] overflow-hidden">
+                    {/* Actions: Add to Cart + Instant Buy */}
+                    <div className="grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => updateQty(item.id, -1)}
-                        className="px-2 py-1 text-xs text-[#7A746E] hover:bg-[#F5F5F3] dark:hover:bg-[#25302D] cursor-pointer"
+                        onClick={() => addToCart(item, qtySelected)}
+                        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-[#00897B] text-[#00897B] dark:text-[#2DD4BF] text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors cursor-pointer"
                       >
-                        <Minus className="h-3 w-3" />
+                        <ShoppingCart className="h-3.5 w-3.5" />
+                        <span>Add to Cart</span>
                       </button>
-                      <span className="px-2 py-1 text-xs font-bold text-[#2E221F] dark:text-[#F0F4F2] min-w-[20px] text-center">
-                        {quantities[item.id] || 1}
-                      </span>
                       <button
-                        onClick={() => updateQty(item.id, 1)}
-                        className="px-2 py-1 text-xs text-[#7A746E] hover:bg-[#F5F5F3] dark:hover:bg-[#25302D] cursor-pointer"
+                        onClick={() => handleBuy(item)}
+                        className="w-full ss-btn-coral py-2 text-xs font-semibold shadow-sm cursor-pointer"
                       >
-                        <Plus className="h-3 w-3" />
+                        Instant Pass
                       </button>
                     </div>
                   </div>
-
-                  {/* Actions: Add to Cart + Instant Buy */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => addToCart(item, qtySelected)}
-                      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-[#00897B] text-[#00897B] dark:text-[#2DD4BF] text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors cursor-pointer"
-                    >
-                      <ShoppingCart className="h-3.5 w-3.5" />
-                      <span>Add to Cart</span>
-                    </button>
-                    <button
-                      onClick={() => handleBuy(item)}
-                      className="w-full ss-btn-coral py-2 text-xs font-semibold shadow-sm cursor-pointer"
-                    >
-                      Instant Pass
-                    </button>
-                  </div>
                 </div>
-              </div>
-            );
-          })
-        )}
-      </div>
+              );
+            })
+          )}
+        </div>
       )}
 
       {/* Cart Modal / Drawer */}
@@ -4211,11 +4197,10 @@ function NgoHistory() {
             <button
               key={st}
               onClick={() => setFilter(st)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${
-                filter === st
-                  ? "bg-[#2D2320] dark:bg-white text-white dark:text-[#2D2320] shadow-sm"
-                  : "bg-white dark:bg-[#1F2825] text-[#7A746E] dark:text-[#A3B2AC] border border-[#EAE6DF] dark:border-[#2D3835]"
-              }`}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${filter === st
+                ? "bg-[#2D2320] dark:bg-white text-white dark:text-[#2D2320] shadow-sm"
+                : "bg-white dark:bg-[#1F2825] text-[#7A746E] dark:text-[#A3B2AC] border border-[#EAE6DF] dark:border-[#2D3835]"
+                }`}
             >
               {st === "ALL" ? "All Orders" : st.charAt(0) + st.slice(1).toLowerCase()}
             </button>
@@ -4362,11 +4347,10 @@ function NotificationsPage() {
           <button
             key={type}
             onClick={() => setFilter(type)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${
-              filter === type
-                ? "bg-[#2D2320] dark:bg-white text-white dark:text-[#2D2320] shadow-sm"
-                : "bg-white dark:bg-[#1F2825] text-[#7A746E] dark:text-[#A3B2AC] border border-[#EAE6DF] dark:border-[#2D3835]"
-            }`}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${filter === type
+              ? "bg-[#2D2320] dark:bg-white text-white dark:text-[#2D2320] shadow-sm"
+              : "bg-white dark:bg-[#1F2825] text-[#7A746E] dark:text-[#A3B2AC] border border-[#EAE6DF] dark:border-[#2D3835]"
+              }`}
           >
             {type === "ALL" ? "All Alerts" : type.charAt(0) + type.slice(1).toLowerCase()}
           </button>
@@ -4378,15 +4362,13 @@ function NotificationsPage() {
           <div
             key={n.id}
             onClick={() => handleItemClick(n)}
-            className={`p-4 rounded-xl border transition-all cursor-pointer flex items-start gap-3.5 ${
-              n.read
-                ? "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] opacity-80"
-                : "border-[#FF6548]/30 bg-[#FFF9F7] dark:bg-[#2A1D1A]"
-            }`}
+            className={`p-4 rounded-xl border transition-all cursor-pointer flex items-start gap-3.5 ${n.read
+              ? "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] opacity-80"
+              : "border-[#FF6548]/30 bg-[#FFF9F7] dark:bg-[#2A1D1A]"
+              }`}
           >
-            <div className={`grid h-8 w-8 place-items-center rounded-lg shrink-0 ${
-              n.type === "DISCOUNT" ? "bg-[#FEECE8] text-[#FF6548]" : "bg-[#E6F8F3] text-[#00897B]"
-            }`}>
+            <div className={`grid h-8 w-8 place-items-center rounded-lg shrink-0 ${n.type === "DISCOUNT" ? "bg-[#FEECE8] text-[#FF6548]" : "bg-[#E6F8F3] text-[#00897B]"
+              }`}>
               <Bell className="h-4 w-4" />
             </div>
             <div className="flex-1 min-w-0">
