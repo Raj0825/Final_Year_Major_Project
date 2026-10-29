@@ -826,7 +826,7 @@ function Topbar({ role, path, onOpenLocation }: { role: AppWorkspaceRole; path: 
 // -------------------------------------------------------------
 // SUPERMARKET WORKSPACE: OVERVIEW
 // -------------------------------------------------------------
-function DashboardHome({ onAction }: { onAction: (message: string) => void }) {
+function DashboardHome({ onAction }: { onAction: (message: string, kind?: ToastKind) => void }) {
   const [, setLocation] = useLocation();
   const [inventory, setInventory] = useState<InventoryItem[]>(loadInventory);
   const [orders, setOrders] = useState<StoreOrder[]>(loadOrders);
@@ -1180,7 +1180,7 @@ function DashboardHome({ onAction }: { onAction: (message: string) => void }) {
   );
 }
 
-function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: string) => void; onOpenSettings?: (tab?: SettingsTab) => void }) {
+function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: string, kind?: ToastKind) => void; onOpenSettings?: (tab?: SettingsTab) => void }) {
   const [, setLocation] = useLocation();
   const [inventory, setInventory] = useState<InventoryItem[]>(loadInventory);
   const [search, setSearch] = useState("");
@@ -2152,7 +2152,7 @@ function DetectionPage({ onAction }: { onAction: (message: string, kind?: ToastK
 // -------------------------------------------------------------
 // SUPERMARKET WORKSPACE: SURPLUS
 // -------------------------------------------------------------
-function SurplusPage({ onAction }: { onAction: (message: string) => void }) {
+function SurplusPage({ onAction }: { onAction: (message: string, kind?: ToastKind) => void }) {
   const [, setLocation] = useLocation();
   const [inventory, setInventory] = useState<InventoryItem[]>(loadInventory);
   const [orders, setOrders] = useState<StoreOrder[]>(loadOrders);
