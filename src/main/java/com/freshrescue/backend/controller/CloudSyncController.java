@@ -248,7 +248,13 @@ public class CloudSyncController {
     }
 
     @PostMapping("/orders")
-    public CloudOrder saveOrder(@RequestBody CloudOrder order, Authentication auth) {
+    public ResponseEntity<?> saveOrder(@RequestBody CloudOrder order, Authentication auth) {
+        boolean hasId = order.getId() != null && !order.getId().isBlank();
+        boolean hasQrCode = order.getQrCode() != null && !order.getQrCode().isBlank();
+        if (!hasId && !hasQrCode) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Order must have an id or qrCode"));
+        }
+
         if (auth != null && auth.isAuthenticated()) {
             String principal = auth.getName();
             User user = userRepository.findById(principal).orElse(null);
@@ -264,21 +270,32 @@ public class CloudSyncController {
             }
         }
 
-        // Deduplicate: If an order already exists with the same ID or same non-empty qrCode, update it
-        if (order.getId() != null && !order.getId().isBlank()) {
-            Optional<CloudOrder> existing = orderRepo.findById(order.getId());
+        // Idempotency: If an order with the same qrCode already exists, update it (keep existing id)
+        if (hasQrCode) {
+            Optional<CloudOrder> existingByQr = orderRepo.findByQrCode(order.getQrCode().trim());
+            if (existingByQr.isPresent()) {
+                CloudOrder ex = existingByQr.get();
+                if (order.getStatus() != null) ex.setStatus(order.getStatus());
+                if (order.getNotes() != null) ex.setNotes(order.getNotes());
+                if (order.getPickupTime() != null) ex.setPickupTime(order.getPickupTime());
+                return ResponseEntity.ok(orderRepo.save(ex));
+            }
+        }
+
+        if (hasId) {
+            Optional<CloudOrder> existing = orderRepo.findById(order.getId().trim());
             if (existing.isPresent()) {
                 CloudOrder ex = existing.get();
                 if (order.getStatus() != null) ex.setStatus(order.getStatus());
                 if (order.getNotes() != null) ex.setNotes(order.getNotes());
-                return orderRepo.save(ex);
+                if (order.getPickupTime() != null) ex.setPickupTime(order.getPickupTime());
+                return ResponseEntity.ok(orderRepo.save(ex));
             }
-        }
-
-        if (order.getId() == null || order.getId().isBlank()) {
+        } else {
             order.setId("ord-" + System.currentTimeMillis());
         }
-        return orderRepo.save(order);
+
+        return ResponseEntity.ok(orderRepo.save(order));
     }
 
     @PatchMapping("/orders/{id}/status")

@@ -16,7 +16,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { login as apiLogin, register as apiRegister } from "@/api/auth";
 import { getMyBatches, createBatch, scanBatch, updateBatchTier } from "@/api/batches";
 import { getListings } from "@/api/listings";
-import { getMyOrders, getPendingStoreOrders, reserveListing, fulfillOrderByCode } from "@/api/orders";
+import { getMyOrders, getPendingStoreOrders, fulfillOrderByCode } from "@/api/orders";
 import { getNotifications } from "@/api/notifications";
 import { getMyStore } from "@/api/stores";
 import type { Batch, Listing, Order, NotificationItem, Role } from "@/types";
