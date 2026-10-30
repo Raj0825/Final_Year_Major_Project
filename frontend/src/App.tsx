@@ -1955,12 +1955,20 @@ function DetectionPage({ onAction }: { onAction: (message: string, kind?: ToastK
         const formData = new FormData();
         formData.append("image", selectedFile);
 
+        const configuredMlUrl = import.meta.env.VITE_ML_URL;
         let res: Response;
-        try {
-          res = await fetch("/ml/predict", { method: "POST", body: formData });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        } catch {
-          res = await fetch("http://localhost:8000/predict", { method: "POST", body: formData });
+
+        if (configuredMlUrl) {
+          // Use explicitly configured cloud ML service URL (e.g. https://my-ml.onrender.com/predict)
+          const endpoint = configuredMlUrl.endsWith("/predict") ? configuredMlUrl : `${configuredMlUrl.replace(/\/+$/, "")}/predict`;
+          res = await fetch(endpoint, { method: "POST", body: formData });
+        } else {
+          try {
+            res = await fetch("/ml/predict", { method: "POST", body: formData });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          } catch {
+            res = await fetch("http://localhost:8000/predict", { method: "POST", body: formData });
+          }
         }
 
         if (!res.ok) {
