@@ -40,4 +40,7 @@ public class CloudInventoryItem {
     private double freshnessScore;
     private String storageTip;
     private Instant createdAt;
+
+    @Builder.Default
+    private java.util.List<FreshnessPoint> freshnessHistory = new java.util.ArrayList<>();
 }

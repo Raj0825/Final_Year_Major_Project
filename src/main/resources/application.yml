@@ -37,4 +37,5 @@ freshness:
     tier1-percent: 20
     tier2-percent: 40
     tier3-percent: 60
+  decay-per-hour: 0.01
   reservation-hold-minutes: 15

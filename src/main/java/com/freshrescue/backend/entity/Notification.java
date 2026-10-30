@@ -30,6 +30,6 @@ public class Notification {
     private Instant createdAt;
 
     public enum NotificationType {
-        NEW_DISCOUNT, PRICE_DROP, URGENT, ORDER_CONFIRMED, PICKUP_REMINDER
+        NEW_DISCOUNT, PRICE_DROP, URGENT, ORDER_CONFIRMED, PICKUP_REMINDER, WATCHLIST
     }
 }

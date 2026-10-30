@@ -30,6 +30,7 @@ public class ListingService {
     private final BatchRepository batchRepository;
     private final StoreRepository storeRepository;
     private final MongoTemplate mongoTemplate;
+    private final WatchlistService watchlistService;
 
     @Value("${freshness.discount.tier1-percent:20}")
     private int tier1Percent;
@@ -45,7 +46,8 @@ public class ListingService {
      * All batches with available quantity > 0 and not EXPIRED are listed.
      */
     public void syncListingForBatch(Batch batch) {
-        if (batch == null || batch.getId() == null) return;
+        if (batch == null || batch.getId() == null)
+            return;
 
         double available = batch.getQuantity() - batch.getQuantityReserved();
         Listing existing = listingRepository.findByBatchId(batch.getId());
@@ -70,7 +72,9 @@ public class ListingService {
         }
 
         // Resolve store name and location
-        String storeName = "Store " + (batch.getStoreId() != null ? batch.getStoreId().substring(Math.max(0, batch.getStoreId().length() - 6)) : "");
+        String storeName = "Store " + (batch.getStoreId() != null
+                ? batch.getStoreId().substring(Math.max(0, batch.getStoreId().length() - 6))
+                : "");
         GeoJsonPoint storeLocation = null;
 
         if (batch.getStoreId() != null) {
@@ -83,9 +87,10 @@ public class ListingService {
             }
         }
 
-        Listing listing = existing != null ? existing : Listing.builder()
-                .listedAt(Instant.now())
-                .build();
+        Listing listing = existing != null ? existing
+                : Listing.builder()
+                        .listedAt(Instant.now())
+                        .build();
 
         listing.setBatchId(batch.getId());
         listing.setStoreId(batch.getStoreId());
@@ -111,11 +116,22 @@ public class ListingService {
         listing.setOriginalPrice(original);
         listing.setCurrentPrice(Math.round(original * (1 - discountPercent / 100.0) * 100.0) / 100.0);
 
-        listingRepository.save(listing);
+        Listing saved = listingRepository.save(listing);
+        if (saved.getQuantityAvailable() > 0) {
+            watchlistService.checkItemAgainstWatches(
+                    saved.getId(),
+                    saved.getProductName(),
+                    saved.getCategory(),
+                    saved.getCurrentPrice(),
+                    saved.getDiscountPercent(),
+                    saved.getStoreName(),
+                    saved.getStoreLocation());
+        }
     }
 
     /**
-     * Buyer App feed: listings within radiusKm of the buyer's location, closest first.
+     * Buyer App feed: listings within radiusKm of the buyer's location, closest
+     * first.
      * Falls back cleanly if 2dsphere index is absent or no listings match distance.
      */
     public List<Listing> findNearby(double longitude, double latitude, double radiusKm) {
@@ -133,7 +149,8 @@ public class ListingService {
                     .filter(l -> l.getQuantityAvailable() > 0)
                     .toList();
         } catch (Exception e) {
-            log.error("GeoNear query error in findNearby(lon={}, lat={}, radius={}): {}", longitude, latitude, radiusKm, e.getMessage(), e);
+            log.error("GeoNear query error in findNearby(lon={}, lat={}, radius={}): {}", longitude, latitude, radiusKm,
+                    e.getMessage(), e);
             return Collections.emptyList();
         }
     }

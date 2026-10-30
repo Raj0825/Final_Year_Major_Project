@@ -1,6 +1,7 @@
 package com.freshrescue.backend.service;
 
 import com.freshrescue.backend.entity.Batch;
+import com.freshrescue.backend.entity.FreshnessPoint;
 import com.freshrescue.backend.repository.BatchRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -68,6 +69,16 @@ public class DiscountEngineService {
 
             boolean changed = batchStateService.applyTransition(batch, estimatedScore);
             if (changed) {
+                if (batch.getFreshnessHistory() == null) {
+                    batch.setFreshnessHistory(new java.util.ArrayList<>());
+                }
+                FreshnessPoint.appendCapped(batch.getFreshnessHistory(), FreshnessPoint.builder()
+                        .timestamp(Instant.now())
+                        .freshnessScore(estimatedScore)
+                        .tier(batch.getState().name())
+                        .source(FreshnessPoint.FreshnessSource.SCHEDULED)
+                        .build());
+
                 batchRepository.save(batch);
                 listingService.syncListingForBatch(batch);
                 if (batch.getState() == Batch.BatchState.TIER_2 || batch.getState() == Batch.BatchState.TIER_3) {

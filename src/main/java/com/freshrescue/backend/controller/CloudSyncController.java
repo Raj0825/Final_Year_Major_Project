@@ -12,7 +12,11 @@ import com.freshrescue.backend.security.StoreAuthorizationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
-import org.springframework.data.mongodb.core.MongoTemplate;
+import com.freshrescue.backend.entity.FreshnessPoint;
+import com.freshrescue.backend.entity.Store;
+import com.freshrescue.backend.repository.StoreRepository;
+import com.freshrescue.backend.service.WatchlistService;
+import org.springframework.data.mongodb.core.geo.GeoJsonPoint;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -38,7 +42,9 @@ public class CloudSyncController {
     private final CloudOrderRepository orderRepo;
     private final UserRepository userRepository;
     private final StoreAuthorizationService storeAuthService;
-    private final MongoTemplate mongoTemplate;
+    private final org.springframework.data.mongodb.core.MongoTemplate mongoTemplate;
+    private final WatchlistService watchlistService;
+    private final StoreRepository storeRepository;
 
     // --- Inventory Sync ---
     @GetMapping("/inventory")
@@ -59,7 +65,13 @@ public class CloudSyncController {
         if (item.getCreatedAt() == null) {
             item.setCreatedAt(Instant.now());
         }
-        return inventoryRepo.save(item);
+
+        CloudInventoryItem existing = inventoryRepo.findById(item.getId()).orElse(null);
+        appendFreshnessPointIfChanged(item, existing);
+
+        CloudInventoryItem saved = inventoryRepo.save(item);
+        triggerWatchlistCheck(saved);
+        return saved;
     }
 
     @PostMapping("/inventory/batch")
@@ -75,12 +87,18 @@ public class CloudSyncController {
                 if (item.getCreatedAt() == null) {
                     item.setCreatedAt(Instant.now());
                 }
+                CloudInventoryItem existing = inventoryRepo.findById(item.getId()).orElse(null);
+                appendFreshnessPointIfChanged(item, existing);
                 validItems.add(item);
             } else {
                 log.warn("Ignored item {} with unauthorized storeId {}", item.getName(), item.getStoreId());
             }
         }
-        return inventoryRepo.saveAll(validItems);
+        List<CloudInventoryItem> saved = inventoryRepo.saveAll(validItems);
+        for (CloudInventoryItem item : saved) {
+            triggerWatchlistCheck(item);
+        }
+        return saved;
     }
 
     @PutMapping("/inventory/sync")
@@ -101,13 +119,32 @@ public class CloudSyncController {
                 if (item.getCreatedAt() == null) {
                     item.setCreatedAt(Instant.now());
                 }
+                CloudInventoryItem existing = inventoryRepo.findById(item.getId()).orElse(null);
+                appendFreshnessPointIfChanged(item, existing);
                 authorizedItems.add(item);
             } else {
                 log.warn("Sync ignored foreign/unauthorized item {} for storeId {}", item.getName(), item.getStoreId());
             }
         }
 
-        return inventoryRepo.saveAll(authorizedItems);
+        List<CloudInventoryItem> saved = inventoryRepo.saveAll(authorizedItems);
+        for (CloudInventoryItem item : saved) {
+            triggerWatchlistCheck(item);
+        }
+        return saved;
+    }
+
+    @GetMapping("/inventory/{id}/history")
+    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
+    public ResponseEntity<List<FreshnessPoint>> getInventoryHistory(@PathVariable String id, Authentication auth) {
+        CloudInventoryItem item = inventoryRepo.findById(id).orElse(null);
+        if (item == null) {
+            return ResponseEntity.notFound().build();
+        }
+        if (!storeAuthService.isAuthorizedForStore(auth, item.getStoreId())) {
+            throw new AccessDeniedException("Unauthorized store access");
+        }
+        return ResponseEntity.ok(item.getFreshnessHistory() != null ? item.getFreshnessHistory() : Collections.emptyList());
     }
 
     @DeleteMapping("/inventory/{id}")
@@ -347,5 +384,57 @@ public class CloudSyncController {
 
         order.setStatus(targetStatus);
         return ResponseEntity.ok(orderRepo.save(order));
+    }
+
+    private void appendFreshnessPointIfChanged(CloudInventoryItem item, CloudInventoryItem existing) {
+        if (item.getFreshnessHistory() == null) {
+            item.setFreshnessHistory(new ArrayList<>());
+        }
+        double score = item.getFreshnessScore() > 0 ? item.getFreshnessScore() : 0.85;
+        String tier = resolveTier(score, item.getDiscountPercent());
+
+        boolean isNew = existing == null || item.getFreshnessHistory().isEmpty();
+        boolean changed = existing != null && (Math.abs(existing.getFreshnessScore() - item.getFreshnessScore()) > 0.001
+                || existing.getDiscountPercent() != item.getDiscountPercent());
+
+        if (isNew || changed) {
+            FreshnessPoint.appendCapped(item.getFreshnessHistory(), FreshnessPoint.builder()
+                    .timestamp(Instant.now())
+                    .freshnessScore(score)
+                    .tier(tier)
+                    .source(FreshnessPoint.FreshnessSource.MANUAL)
+                    .build());
+        }
+    }
+
+    private String resolveTier(double score, int discount) {
+        if (score < 0.10) return "EXPIRED";
+        if (score < 0.30) return "TIER_3";
+        if (score < 0.50) return "TIER_2";
+        if (score < 0.70) return "TIER_1";
+        return "FRESH";
+    }
+
+    private void triggerWatchlistCheck(CloudInventoryItem item) {
+        try {
+            GeoJsonPoint storeLoc = null;
+            if (item.getStoreId() != null) {
+                Store s = storeRepository.findById(item.getStoreId()).orElse(null);
+                if (s != null) {
+                    storeLoc = s.getLocation();
+                }
+            }
+            watchlistService.checkItemAgainstWatches(
+                    item.getId(),
+                    item.getName(),
+                    item.getCategory(),
+                    item.getCurrentPrice(),
+                    item.getDiscountPercent(),
+                    item.getStore(),
+                    storeLoc
+            );
+        } catch (Exception e) {
+            log.warn("Failed watchlist check for item {}: {}", item.getId(), e.getMessage());
+        }
     }
 }

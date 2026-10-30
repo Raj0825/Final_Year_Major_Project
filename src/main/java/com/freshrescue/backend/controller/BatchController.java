@@ -146,6 +146,16 @@ public class BatchController {
             batch.setCurrentDiscountPercent(0);
         }
         batch.setNeedsManualReview(false);
+        if (batch.getFreshnessHistory() == null) {
+            batch.setFreshnessHistory(new ArrayList<>());
+        }
+        com.freshrescue.backend.entity.FreshnessPoint.appendCapped(batch.getFreshnessHistory(),
+                com.freshrescue.backend.entity.FreshnessPoint.builder()
+                        .timestamp(Instant.now())
+                        .freshnessScore(batch.getFreshnessScore() != null ? batch.getFreshnessScore() : 1.0)
+                        .tier(batch.getState() != null ? batch.getState().name() : "MANUAL")
+                        .source(com.freshrescue.backend.entity.FreshnessPoint.FreshnessSource.MANUAL)
+                        .build());
         Batch saved = batchRepository.save(batch);
         listingService.syncListingForBatch(saved);
         return saved;
@@ -160,6 +170,14 @@ public class BatchController {
             listingService.syncListingForBatch(b);
         }
         return batches;
+    }
+
+    @GetMapping("/{id}/history")
+    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
+    public List<com.freshrescue.backend.entity.FreshnessPoint> getBatchHistory(@PathVariable String id, Authentication auth) {
+        Batch batch = batchService.getBatch(id);
+        resolveAndVerifyStore(auth, batch.getStoreId());
+        return batch.getFreshnessHistory() != null ? batch.getFreshnessHistory() : Collections.emptyList();
     }
 
     @PostMapping(value = "/{id}/scan", consumes = "multipart/form-data")

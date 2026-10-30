@@ -39,3 +39,10 @@ export const scanBatch = (id: string, image: File) => {
     })
     .then((r) => r.data)
 }
+
+export const getBatchHistory = (id: string) =>
+  api.get<any[]>(`/batches/${id}/history`).then((r) => r.data)
+
+export const getCloudInventoryHistory = (id: string) =>
+  api.get<any[]>(`/cloud-sync/inventory/${id}/history`).then((r) => r.data)
+

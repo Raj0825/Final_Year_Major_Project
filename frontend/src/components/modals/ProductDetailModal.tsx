@@ -1,20 +1,30 @@
-import React, { useState } from "react";
-import { X, Sparkles, MapPin, Clock, ShieldCheck, Check, ShoppingBag, Minus, Plus } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { X, Sparkles, MapPin, Clock, ShieldCheck, Check, ShoppingBag, Minus, Plus, Bell } from "lucide-react";
 import { InventoryItem } from "@/data/mockStore";
+import { nextPriceDrop, formatTimeRemaining } from "@/config/tierConfig";
 
 interface ProductDetailModalProps {
   item: InventoryItem | null;
   isOpen: boolean;
   onClose: () => void;
   onReserve: (item: InventoryItem, qty: number) => void;
+  onWatch?: (item: InventoryItem) => void;
 }
 
-export function ProductDetailModal({ item, isOpen, onClose, onReserve }: ProductDetailModalProps) {
+export function ProductDetailModal({ item, isOpen, onClose, onReserve, onWatch }: ProductDetailModalProps) {
   if (!isOpen || !item) return null;
 
   const [qty, setQty] = useState(1);
+  const [nowMs, setNowMs] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
   const savings = ((item.originalPrice - item.currentPrice) * qty).toFixed(2);
   const total = (item.currentPrice * qty).toFixed(2);
+  const drop = nextPriceDrop(item, undefined, nowMs);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 ss-reveal">
@@ -63,6 +73,28 @@ export function ProductDetailModal({ item, isOpen, onClose, onReserve }: Product
             </div>
             <span className="ss-chip badge-available">Certified Quality</span>
           </div>
+
+          {/* Feature 1: Expected Price Drop Countdown */}
+          {drop && (
+            <div className="p-3.5 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="grid h-8 w-8 place-items-center rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0">
+                  <Clock className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="font-bold text-[#2E221F] dark:text-[#F0F4F2]">
+                    Expected: Price drops to {drop.nextDiscountPercent}% off in {formatTimeRemaining(drop.dropsAt, nowMs)}
+                  </p>
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
+                    Estimated by freshness decay engine based on batch telemetry
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 shrink-0">
+                Expected
+              </span>
+            </div>
+          )}
 
           {/* Details Grid */}
           <div className="grid grid-cols-2 gap-3 text-xs">
@@ -136,6 +168,19 @@ export function ProductDetailModal({ item, isOpen, onClose, onReserve }: Product
             >
               <ShoppingBag className="h-4 w-4" /> Reserve & Generate Pass
             </button>
+            {onWatch && (
+              <button
+                type="button"
+                onClick={() => {
+                  onWatch(item);
+                  onClose();
+                }}
+                className="px-3 py-3 rounded-xl border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                title="Create a price alert for this item"
+              >
+                <Bell className="h-4 w-4" /> Watch
+              </button>
+            )}
             <button
               type="button"
               onClick={onClose}

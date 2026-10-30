@@ -6,7 +6,8 @@ import {
   Plus, Search, Send, Settings, ShieldCheck, SlidersHorizontal,
   Truck, UploadCloud, Users, X, ScanLine, Sparkles, RefreshCw, ShoppingBag,
   QrCode, History, ShoppingCart, Store, Minus, Moon, Sun, Trash2, Info, Phone,
-  ExternalLink, FileText, ArrowUpDown, CheckCircle, Download, Eye, Navigation, Camera
+  ExternalLink, FileText, ArrowUpDown, CheckCircle, Download, Eye, Navigation, Camera,
+  Clock
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Link, Route, Switch, useLocation } from "wouter";
@@ -33,6 +34,8 @@ import { SettingsModal, SettingsTab } from "@/components/modals/SettingsModal";
 import { ProductDetailModal } from "@/components/modals/ProductDetailModal";
 import { EditBatchModal } from "@/components/modals/EditBatchModal";
 import { ReceiptModal } from "@/components/modals/ReceiptModal";
+import { WatchlistModal } from "@/components/modals/WatchlistModal";
+import { nextPriceDrop, formatTimeRemaining } from "@/config/tierConfig";
 import LiveMapView from "@/components/LiveMapView";
 import ESGDashboard from "@/components/ESGDashboard";
 
@@ -2722,6 +2725,8 @@ function NgoOverview({ onAction, onOpenSettings }: { onAction: (message: string,
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [detailItem, setDetailItem] = useState<InventoryItem | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<StoreOrder | null>(null);
+  const [watchlistOpen, setWatchlistOpen] = useState(false);
+  const [watchPrefill, setWatchPrefill] = useState<{ keyword?: string; category?: string; maxPrice?: number } | null>(null);
 
   useEffect(() => {
     const handleUpdate = () => {
@@ -3141,8 +3146,25 @@ function NgoOverview({ onAction, onOpenSettings }: { onAction: (message: string,
             onAction(`Reserved ${q} ${it.unit} of ${it.name}!`, "success");
             setSelectedReceipt(order);
           }}
+          onWatch={(it) => {
+            setWatchPrefill({
+              keyword: it.name,
+              category: it.category,
+              maxPrice: it.currentPrice,
+            });
+            setWatchlistOpen(true);
+          }}
         />
       )}
+
+      <WatchlistModal
+        isOpen={watchlistOpen}
+        onClose={() => { setWatchlistOpen(false); setWatchPrefill(null); }}
+        initialKeyword={watchPrefill?.keyword}
+        initialCategory={watchPrefill?.category}
+        initialMaxPrice={watchPrefill?.maxPrice}
+        onAction={onAction}
+      />
 
       {/* Receipt Modal */}
       {selectedReceipt && (
@@ -3176,6 +3198,14 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
   const [favorites, setFavorites] = useState<string[]>(() => settings.favoriteStores || []);
   const [cart, setCart] = useState<{ item: InventoryItem; qty: number }[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [watchlistOpen, setWatchlistOpen] = useState(false);
+  const [watchPrefill, setWatchPrefill] = useState<{ keyword?: string; category?: string; maxPrice?: number } | null>(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const toggleFavorite = (storeName: string) => {
     const next = favorites.includes(storeName)
@@ -3403,6 +3433,16 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
             <span>Favorites {favorites.length > 0 ? `(${favorites.length})` : ""}</span>
           </button>
 
+          {/* Watchlist Alerts */}
+          <button
+            onClick={() => { setWatchPrefill(null); setWatchlistOpen(true); }}
+            className="px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] text-[#554F4A] dark:text-[#CBD5E1] hover:bg-[#FAF8F5]"
+            title="Manage your surplus food watchlist alerts"
+          >
+            <Bell className="h-4 w-4 text-amber-500" />
+            <span>Watchlist</span>
+          </button>
+
           {/* Cart Button */}
           <button
             onClick={() => setCartOpen(true)}
@@ -3608,6 +3648,7 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
                 const itemDist = calculateDistance(settings.userLocation || settings.selectedArea, item.storeLocation || item.store);
                 const isCheapest = idx === 0 && compareRankedItems.length > 1;
                 const qtySelected = quantities[item.id] > 0 ? quantities[item.id] : 1;
+                const drop = nextPriceDrop(item, undefined, nowMs);
 
                 return (
                   <div
@@ -3666,6 +3707,11 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
                         <p className="text-[11px] text-[#8A847E] dark:text-[#7A746E]">
                           {item.available} {item.unit} available
                         </p>
+                        {drop && (
+                          <span className="text-[10px] text-amber-700 dark:text-amber-400 font-semibold block mt-0.5">
+                            Drops to {drop.nextDiscountPercent}% in {formatTimeRemaining(drop.dropsAt, nowMs)} (expected)
+                          </span>
+                        )}
                       </div>
 
                       {/* Stepper */}
@@ -3761,6 +3807,7 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
               const isFav = favorites.includes(item.store);
               const mapsQuery = encodeURIComponent(`${item.store} ${item.storeLocation || ""}`);
               const qtySelected = quantities[item.id] > 0 ? quantities[item.id] : 1;
+              const drop = nextPriceDrop(item, undefined, nowMs);
 
               return (
                 <div key={item.id} className="ss-card p-5 bg-white dark:bg-[#1F2825] space-y-3.5 flex flex-col justify-between hover:shadow-md transition-shadow">
@@ -3789,6 +3836,20 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
                             title={isFav ? "Favorited store" : "Add store to favorites"}
                           >
                             <Heart className={`h-4 w-4 ${isFav ? "fill-rose-500 text-rose-500" : ""}`} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setWatchPrefill({
+                                keyword: item.name,
+                                category: item.category,
+                                maxPrice: item.currentPrice,
+                              });
+                              setWatchlistOpen(true);
+                            }}
+                            className="p-1 text-[#7A746E] hover:text-amber-500 cursor-pointer"
+                            title="Watch for price drops"
+                          >
+                            <Bell className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => setDetailItem(item)}
@@ -3820,6 +3881,14 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
                           <ExternalLink className="h-2.5 w-2.5 opacity-70" />
                         </a>
                       </div>
+
+                      {/* Feature 1: Expected Price Drop Countdown */}
+                      {drop && (
+                        <div className="mt-2.5 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-amber-800 dark:text-amber-300 text-xs font-semibold">
+                          <Clock className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                          <span>Expected: Price drops to {drop.nextDiscountPercent}% off in {formatTimeRemaining(drop.dropsAt, nowMs)}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Two info boxes */}
@@ -4009,8 +4078,25 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
             onAction(`Reserved ${q} ${it.unit} of ${it.name}!`, "success");
             setSelectedReceipt(order);
           }}
+          onWatch={(it) => {
+            setWatchPrefill({
+              keyword: it.name,
+              category: it.category,
+              maxPrice: it.currentPrice,
+            });
+            setWatchlistOpen(true);
+          }}
         />
       )}
+
+      <WatchlistModal
+        isOpen={watchlistOpen}
+        onClose={() => { setWatchlistOpen(false); setWatchPrefill(null); }}
+        initialKeyword={watchPrefill?.keyword}
+        initialCategory={watchPrefill?.category}
+        initialMaxPrice={watchPrefill?.maxPrice}
+        onAction={onAction}
+      />
 
       {selectedReceipt && (
         <ReceiptModal
@@ -4292,11 +4378,39 @@ function NgoHistory() {
 function NotificationsPage() {
   const [, setLocation] = useLocation();
   const [notifs, setNotifs] = useState<AppNotification[]>(loadNotifications);
-  const [filter, setFilter] = useState<"ALL" | "ORDER" | "DISCOUNT" | "SYSTEM">("ALL");
+  const [filter, setFilter] = useState<"ALL" | "WATCHLIST" | "ORDER" | "DISCOUNT" | "SYSTEM">("ALL");
 
   useEffect(() => {
     const handleUpdate = () => setNotifs(loadNotifications());
     window.addEventListener("ss_notifs_updated", handleUpdate);
+
+    // Fetch live notifications from server (including WATCHLIST notifications)
+    getNotifications()
+      .then((serverNotifs) => {
+        if (Array.isArray(serverNotifs) && serverNotifs.length > 0) {
+          const current = loadNotifications();
+          const existingIds = new Set(current.map(n => n.id));
+          const newNotifs: AppNotification[] = [];
+          serverNotifs.forEach(sn => {
+            if (!existingIds.has(sn.id)) {
+              newNotifs.push({
+                id: sn.id,
+                title: sn.type === "WATCHLIST" ? "Watchlist Price Alert" : sn.type.replace(/_/g, " "),
+                message: sn.message,
+                type: sn.type === "WATCHLIST" ? "WATCHLIST" : (sn.type.includes("ORDER") ? "ORDER" : sn.type.includes("DISCOUNT") || sn.type.includes("PRICE") ? "DISCOUNT" : "SYSTEM"),
+                read: sn.read,
+                createdAt: sn.createdAt,
+                link: "/ngo/available-food",
+              });
+            }
+          });
+          if (newNotifs.length > 0) {
+            saveNotifications([...newNotifs, ...current]);
+          }
+        }
+      })
+      .catch(() => { });
+
     return () => window.removeEventListener("ss_notifs_updated", handleUpdate);
   }, []);
 
@@ -4323,7 +4437,7 @@ function NotificationsPage() {
         <div>
           <p className="text-xs font-bold uppercase tracking-wider text-[#00897B] dark:text-[#2DD4BF]">UPDATES & ALERTS</p>
           <h1 className="text-3xl font-extrabold tracking-tight text-[#2E221F] dark:text-[#F0F4F2] mt-1">Notifications</h1>
-          <p className="text-sm text-[#78726B] dark:text-[#A3B2AC] mt-1">Real-time alerts for customer reservations, AI freshness analyses, and emergency price cuts.</p>
+          <p className="text-sm text-[#78726B] dark:text-[#A3B2AC] mt-1">Real-time alerts for customer reservations, AI freshness analyses, and watchlist price cuts.</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -4342,8 +4456,8 @@ function NotificationsPage() {
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex gap-2">
-        {(["ALL", "ORDER", "DISCOUNT", "SYSTEM"] as const).map(type => (
+      <div className="flex gap-2 flex-wrap">
+        {(["ALL", "WATCHLIST", "ORDER", "DISCOUNT", "SYSTEM"] as const).map(type => (
           <button
             key={type}
             onClick={() => setFilter(type)}
@@ -4352,7 +4466,7 @@ function NotificationsPage() {
               : "bg-white dark:bg-[#1F2825] text-[#7A746E] dark:text-[#A3B2AC] border border-[#EAE6DF] dark:border-[#2D3835]"
               }`}
           >
-            {type === "ALL" ? "All Alerts" : type.charAt(0) + type.slice(1).toLowerCase()}
+            {type === "ALL" ? "All Alerts" : type === "WATCHLIST" ? "🎯 Watchlist" : type.charAt(0) + type.slice(1).toLowerCase()}
           </button>
         ))}
       </div>
@@ -4364,16 +4478,29 @@ function NotificationsPage() {
             onClick={() => handleItemClick(n)}
             className={`p-4 rounded-xl border transition-all cursor-pointer flex items-start gap-3.5 ${n.read
               ? "border-[#EAE6DF] dark:border-[#2D3835] bg-white dark:bg-[#1F2825] opacity-80"
-              : "border-[#FF6548]/30 bg-[#FFF9F7] dark:bg-[#2A1D1A]"
+              : n.type === "WATCHLIST"
+                ? "border-amber-300 bg-amber-50/50 dark:bg-amber-950/20"
+                : "border-[#FF6548]/30 bg-[#FFF9F7] dark:bg-[#2A1D1A]"
               }`}
           >
-            <div className={`grid h-8 w-8 place-items-center rounded-lg shrink-0 ${n.type === "DISCOUNT" ? "bg-[#FEECE8] text-[#FF6548]" : "bg-[#E6F8F3] text-[#00897B]"
+            <div className={`grid h-8 w-8 place-items-center rounded-lg shrink-0 ${n.type === "WATCHLIST"
+              ? "bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300"
+              : n.type === "DISCOUNT"
+                ? "bg-[#FEECE8] text-[#FF6548]"
+                : "bg-[#E6F8F3] text-[#00897B]"
               }`}>
               <Bell className="h-4 w-4" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-bold text-[#2E221F] dark:text-[#F0F4F2]">{n.title}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm font-bold text-[#2E221F] dark:text-[#F0F4F2]">{n.title}</p>
+                  {n.type === "WATCHLIST" && (
+                    <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-200/80 dark:bg-amber-900 text-amber-900 dark:text-amber-200">
+                      WATCHLIST
+                    </span>
+                  )}
+                </div>
                 <span className="text-[11px] text-[#8A847E] dark:text-[#64748B]">
                   {new Date(n.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </span>

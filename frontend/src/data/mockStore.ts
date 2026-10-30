@@ -14,6 +14,13 @@ export interface RegisteredStore {
   joinedAt: string;
 }
 
+export interface FreshnessHistoryPoint {
+  timestamp: string;
+  freshnessScore: number;
+  tier: string;
+  source: "SCAN" | "MANUAL" | "SCHEDULED";
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
@@ -38,6 +45,7 @@ export interface InventoryItem {
   distance: string;
   freshnessScore: number;
   storageTip?: string;
+  freshnessHistory?: FreshnessHistoryPoint[];
 }
 
 export interface StoreOrder {
@@ -65,7 +73,7 @@ export interface AppNotification {
   id: string;
   title: string;
   message: string;
-  type: "ORDER" | "EXPIRY" | "DISCOUNT" | "SYSTEM";
+  type: "ORDER" | "EXPIRY" | "DISCOUNT" | "SYSTEM" | "WATCHLIST";
   read: boolean;
   createdAt: string;
   link?: string;

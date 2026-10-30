@@ -94,6 +94,16 @@ public class BatchService {
         }
 
         boolean tierChanged = batchStateService.applyTransition(batch, prediction.freshnessScore());
+        if (batch.getFreshnessHistory() == null) {
+            batch.setFreshnessHistory(new ArrayList<>());
+        }
+        com.freshrescue.backend.entity.FreshnessPoint.appendCapped(batch.getFreshnessHistory(),
+                com.freshrescue.backend.entity.FreshnessPoint.builder()
+                        .timestamp(Instant.now())
+                        .freshnessScore(prediction.freshnessScore())
+                        .tier(batch.getState().name())
+                        .source(com.freshrescue.backend.entity.FreshnessPoint.FreshnessSource.SCAN)
+                        .build());
         Batch saved = batchRepository.save(batch);
 
         if (tierChanged) {

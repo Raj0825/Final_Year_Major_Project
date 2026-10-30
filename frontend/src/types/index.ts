@@ -88,9 +88,19 @@ export interface NotificationItem {
   id: string
   userId: string
   listingId?: string
-  type: 'NEW_DISCOUNT' | 'PRICE_DROP' | 'URGENT' | 'ORDER_CONFIRMED' | 'PICKUP_REMINDER'
+  type: 'NEW_DISCOUNT' | 'PRICE_DROP' | 'URGENT' | 'ORDER_CONFIRMED' | 'PICKUP_REMINDER' | 'WATCHLIST'
   message: string
   read: boolean
+  createdAt: string
+}
+
+export interface WatchItem {
+  id: string
+  userId: string
+  keyword: string
+  category?: string
+  maxPrice?: number
+  radiusKm: number
   createdAt: string
 }
 

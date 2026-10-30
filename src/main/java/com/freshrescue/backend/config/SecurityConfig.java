@@ -71,11 +71,13 @@ public class SecurityConfig {
                 .exceptionHandling(eh -> eh.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/api/config/**").permitAll()
                         .requestMatchers("/api/listings/**").permitAll()
                         .requestMatchers("/api/images/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/batches/**").hasAnyRole("STORE_MANAGER", "STORE_STAFF")
                         .requestMatchers("/api/orders/**").hasAnyRole("NGO", "CUSTOMER", "STORE_MANAGER", "STORE_STAFF")
+                        .requestMatchers("/api/watchlist/**").hasAnyRole("NGO", "CUSTOMER")
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

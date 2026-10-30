@@ -69,6 +69,9 @@ public class Batch {
     @LastModifiedDate
     private Instant updatedAt;
 
+    @Builder.Default
+    private List<FreshnessPoint> freshnessHistory = new ArrayList<>();
+
     public enum BatchState {
         FRESH, TIER_1, TIER_2, TIER_3, EXPIRED
     }

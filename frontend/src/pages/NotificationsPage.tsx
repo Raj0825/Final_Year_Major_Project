@@ -49,6 +49,7 @@ export default function NotificationsPage() {
 
   const getIcon = (type: string) => {
     switch (type) {
+      case 'WATCHLIST': return '🎯'
       case 'NEW_DISCOUNT': return '🏷️'
       case 'PRICE_DROP': return '📉'
       case 'URGENT': return '⚡'
