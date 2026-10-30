@@ -1849,7 +1849,7 @@ function DetectionPage({ onAction }: { onAction: (message: string, kind?: ToastK
   const [scanning, setScanning] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<{
     freshnessScore: number;
-    decayTier: "TIER_1" | "TIER_2" | "TIER_3";
+    decayTier: "FRESH" | "TIER_1" | "TIER_2" | "TIER_3" | "EXPIRED";
     decayStatus: string;
     suggestedDiscount: number;
     suggestedHours: number;
@@ -1943,27 +1943,98 @@ function DetectionPage({ onAction }: { onAction: (message: string, kind?: ToastK
   };
 
   const handleRunScan = async () => {
+    if (!selectedFile && !previewUrl) {
+      onAction("Please upload a photo of the produce first.", "error");
+      return;
+    }
+
     setScanning(true);
     try {
-      await new Promise(r => setTimeout(r, 1000));
-      // MobileNetV2 produce inference simulation
-      const baseScore = targetItem ? targetItem.freshnessScore : 0.76;
-      const score = Math.min(0.98, Math.max(0.35, baseScore + (Math.random() * 0.1 - 0.05)));
-      const discount = score >= 0.85 ? 15 : score >= 0.6 ? 35 : 55;
-      const tier = score >= 0.85 ? "TIER_1" : score >= 0.6 ? "TIER_2" : "TIER_3";
-      const status = score >= 0.85 ? "Crisp & Firm (Prime)" : score >= 0.6 ? "Moderate Ripeness (Fair)" : "Expiring Soon (Urgent)";
+      if (selectedFile) {
+        // Send real image to Python ML microservice
+        const formData = new FormData();
+        formData.append("image", selectedFile);
 
-      setAnalysisResult({
-        freshnessScore: score,
-        decayTier: tier,
-        decayStatus: status,
-        suggestedDiscount: discount,
-        suggestedHours: Math.round(score * 36),
-        notes: `MobileNetV2 neural vision analyzed surface texture and hue uniformity. Confidence: 94.8%.`
-      });
-      onAction(`AI Freshness Analysis complete: ${Math.round(score * 100)}% (${status})`, "success");
+        let res: Response;
+        try {
+          res = await fetch("/ml/predict", { method: "POST", body: formData });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        } catch {
+          res = await fetch("http://localhost:8000/predict", { method: "POST", body: formData });
+        }
+
+        if (!res.ok) {
+          throw new Error(`ML service returned status ${res.status}`);
+        }
+
+        const data = await res.json();
+        const score = typeof data.freshnessScore === "number" ? data.freshnessScore : 0.50;
+        const confidencePct = data.confidence ? Math.round(data.confidence * 100) : 90;
+        const topClass = data.predictedClass || "Produce";
+
+        // Determine tier and discount using configured thresholds
+        let tier: "FRESH" | "TIER_1" | "TIER_2" | "TIER_3" | "EXPIRED";
+        let discount: number;
+        let status: string;
+
+        if (score >= TIER_CONFIG.tier1Max) {
+          tier = "FRESH";
+          discount = 0;
+          status = "Crisp & Firm (Prime)";
+        } else if (score >= TIER_CONFIG.tier2Max) {
+          tier = "TIER_1";
+          discount = TIER_CONFIG.tier1Percent;
+          status = "Good Condition (Tier 1)";
+        } else if (score >= TIER_CONFIG.tier3Max) {
+          tier = "TIER_2";
+          discount = TIER_CONFIG.tier2Percent;
+          status = "Moderate Ripeness (Tier 2)";
+        } else if (score >= TIER_CONFIG.expiredMax) {
+          tier = "TIER_3";
+          discount = TIER_CONFIG.tier3Percent;
+          status = "Expiring Soon (Tier 3 Urgent)";
+        } else {
+          tier = "EXPIRED";
+          discount = 0;
+          status = "Discard recommended (Expired)";
+        }
+
+        const hours = data.predictedDaysToExpiry != null ? data.predictedDaysToExpiry * 24 : Math.round(score * 36);
+        const freshProb = data.freshProbability != null ? Math.round(data.freshProbability * 100) : 0;
+        const semiProb = data.semifreshProbability != null ? Math.round(data.semifreshProbability * 100) : 0;
+        const rottenProb = data.rottenProbability != null ? Math.round(data.rottenProbability * 100) : 0;
+
+        setAnalysisResult({
+          freshnessScore: score,
+          decayTier: tier,
+          decayStatus: status,
+          suggestedDiscount: discount,
+          suggestedHours: hours,
+          notes: `Fruit Freshness CNN classified produce as '${topClass}' with ${confidencePct}% confidence. Probabilities: fresh ${freshProb}%, semifresh ${semiProb}%, rotten ${rottenProb}%.${data.needsManualReview ? " (Flagged: Needs manual inspection)" : ""}`
+        });
+        onAction(`AI Freshness Analysis complete: ${Math.round(score * 100)}% (${status})`, "success");
+      } else {
+        // Fallback simulation only when no local file was uploaded (e.g. testing preset card)
+        await new Promise(r => setTimeout(r, 600));
+        const baseScore = targetItem ? targetItem.freshnessScore : 0.76;
+        const score = Math.min(0.98, Math.max(0.35, baseScore + (Math.random() * 0.1 - 0.05)));
+        const discount = score >= TIER_CONFIG.tier1Max ? 0 : score >= TIER_CONFIG.tier2Max ? TIER_CONFIG.tier1Percent : score >= TIER_CONFIG.tier3Max ? TIER_CONFIG.tier2Percent : score >= TIER_CONFIG.expiredMax ? TIER_CONFIG.tier3Percent : 0;
+        const tier = score >= TIER_CONFIG.tier1Max ? "FRESH" : score >= TIER_CONFIG.tier2Max ? "TIER_1" : score >= TIER_CONFIG.tier3Max ? "TIER_2" : score >= TIER_CONFIG.expiredMax ? "TIER_3" : "EXPIRED";
+        const status = score >= TIER_CONFIG.tier1Max ? "Crisp & Firm (Prime)" : score >= TIER_CONFIG.tier2Max ? "Good Condition (Tier 1)" : score >= TIER_CONFIG.tier3Max ? "Moderate Ripeness (Tier 2)" : score >= TIER_CONFIG.expiredMax ? "Expiring Soon (Tier 3 Urgent)" : "Discard recommended (Expired)";
+
+        setAnalysisResult({
+          freshnessScore: score,
+          decayTier: tier,
+          decayStatus: status,
+          suggestedDiscount: discount,
+          suggestedHours: Math.round(score * 36),
+          notes: `Preset simulation profile loaded for demonstration.`
+        });
+        onAction(`AI Freshness Analysis complete: ${Math.round(score * 100)}% (${status})`, "success");
+      }
     } catch (err: any) {
-      onAction("CNN analysis failed. Please try again.", "error");
+      console.error("AI scan failed:", err);
+      onAction("ML Service unreachable on http://localhost:8000. Start 'python app.py' in ml_service first.", "error");
     } finally {
       setScanning(false);
     }
@@ -2111,14 +2182,18 @@ function DetectionPage({ onAction }: { onAction: (message: string, kind?: ToastK
               <div className="rounded-2xl border border-[#EAE6DF] dark:border-[#2D3835] bg-[#FAF8F5] dark:bg-[#1A2220] p-6 space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#00897B] dark:text-[#2DD4BF]">MobileNetV2 Classifier</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#00897B] dark:text-[#2DD4BF]">Fruit Freshness CNN Classifier</span>
                     <h3 className="text-2xl font-extrabold text-[#2E221F] dark:text-[#F0F4F2] mt-0.5">{targetItem?.name || "Produce Lot"}</h3>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${analysisResult.decayTier === "TIER_1"
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${analysisResult.decayTier === "FRESH"
                     ? "bg-[#E6F8F3] text-[#00897B]"
-                    : analysisResult.decayTier === "TIER_2"
-                      ? "bg-[#FEF3C7] text-[#D97706]"
-                      : "bg-[#FEECE8] text-[#FF6548]"
+                    : analysisResult.decayTier === "TIER_1"
+                      ? "bg-[#E0F2FE] text-[#0284C7]"
+                      : analysisResult.decayTier === "TIER_2"
+                        ? "bg-[#FEF3C7] text-[#D97706]"
+                        : analysisResult.decayTier === "TIER_3"
+                          ? "bg-[#FEECE8] text-[#FF6548]"
+                          : "bg-[#FEE2E2] text-[#DC2626]"
                     }`}>
                     {analysisResult.decayTier}
                   </span>
