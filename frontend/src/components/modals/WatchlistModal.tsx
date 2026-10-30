@@ -9,7 +9,7 @@ interface WatchlistModalProps {
   initialKeyword?: string;
   initialCategory?: string;
   initialMaxPrice?: number;
-  onAction?: (msg: string, kind?: "success" | "error" | "info") => void;
+  onAction?: (msg: string, kind?: "success" | "warning" | "error") => void;
 }
 
 export function WatchlistModal({
@@ -107,7 +107,7 @@ export function WatchlistModal({
     try {
       await deleteWatch(id);
       setWatches(prev => prev.filter(w => w.id !== id));
-      onAction?.(`Removed alert for "${kw}"`, "info");
+      onAction?.(`Removed alert for "${kw}"`, "warning");
     } catch (err: any) {
       onAction?.("Failed to delete watch alert", "error");
     }

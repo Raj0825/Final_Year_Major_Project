@@ -40,7 +40,7 @@ import LiveMapView from "@/components/LiveMapView";
 import ESGDashboard from "@/components/ESGDashboard";
 
 type AppWorkspaceRole = "supermarket" | "ngo";
-type ToastKind = "success" | "warning" | "error";
+type ToastKind = "success" | "warning" | "error" | "info";
 type ToastState = { message: string; kind: ToastKind } | null;
 
 // Dark Mode Theme Context
