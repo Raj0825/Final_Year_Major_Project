@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { X, Check, Trash2, Tag, CalendarClock, DollarSign, Activity, History, Sparkles } from "lucide-react";
 import { InventoryItem, FreshnessHistoryPoint } from "@/data/mockStore";
 import { getCloudInventoryHistory } from "@/api/batches";
+import { TIER_CONFIG } from "@/config/tierConfig";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from "recharts";
 
 interface EditBatchModalProps {
@@ -21,8 +22,8 @@ export function EditBatchModal({ item, isOpen, onClose, onSave, onDelete }: Edit
       ? item.freshnessHistory
       : [{
           timestamp: new Date().toISOString(),
-          freshnessScore: item.freshnessScore || 0.85,
-          tier: (item.freshnessScore || 0.85) >= 0.70 ? "FRESH" : (item.freshnessScore || 0.85) >= 0.50 ? "TIER_1" : (item.freshnessScore || 0.85) >= 0.30 ? "TIER_2" : "TIER_3",
+          freshnessScore: item.freshnessScore || 0.95,
+          tier: (item.freshnessScore || 0.95) >= TIER_CONFIG.tier1Max ? "FRESH" : (item.freshnessScore || 0.95) >= TIER_CONFIG.tier2Max ? "TIER_1" : (item.freshnessScore || 0.95) >= TIER_CONFIG.tier3Max ? "TIER_2" : (item.freshnessScore || 0.95) >= TIER_CONFIG.expiredMax ? "TIER_3" : "EXPIRED",
           source: "SCAN" as const
         }];
   });
@@ -256,8 +257,10 @@ export function EditBatchModal({ item, isOpen, onClose, onSave, onDelete }: Edit
                           return null;
                         }}
                       />
-                      <ReferenceLine y={70} stroke="#10B981" strokeDasharray="3 3" />
-                      <ReferenceLine y={50} stroke="#F59E0B" strokeDasharray="3 3" />
+                      <ReferenceLine y={Math.round(TIER_CONFIG.tier1Max * 100)} stroke="#10B981" strokeDasharray="3 3" />
+                      <ReferenceLine y={Math.round(TIER_CONFIG.tier2Max * 100)} stroke="#3B82F6" strokeDasharray="3 3" />
+                      <ReferenceLine y={Math.round(TIER_CONFIG.tier3Max * 100)} stroke="#F59E0B" strokeDasharray="3 3" />
+                      <ReferenceLine y={Math.round(TIER_CONFIG.expiredMax * 100)} stroke="#EF4444" strokeDasharray="3 3" />
                       <Line type="monotone" dataKey="score" stroke="#00897B" strokeWidth={2.5} dot={{ r: 3, fill: "#00897B" }} activeDot={{ r: 5 }} />
                     </LineChart>
                   </ResponsiveContainer>

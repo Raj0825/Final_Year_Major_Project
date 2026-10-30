@@ -15,6 +15,7 @@ import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import com.freshrescue.backend.entity.FreshnessPoint;
 import com.freshrescue.backend.entity.Store;
 import com.freshrescue.backend.repository.StoreRepository;
+import com.freshrescue.backend.service.BatchStateService;
 import com.freshrescue.backend.service.WatchlistService;
 import org.springframework.data.mongodb.core.geo.GeoJsonPoint;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -45,11 +46,17 @@ public class CloudSyncController {
     private final org.springframework.data.mongodb.core.MongoTemplate mongoTemplate;
     private final WatchlistService watchlistService;
     private final StoreRepository storeRepository;
+    private final BatchStateService batchStateService;
 
     // --- Inventory Sync ---
     @GetMapping("/inventory")
     public List<CloudInventoryItem> getAllInventory() {
-        return inventoryRepo.findAll();
+        List<CloudInventoryItem> all = inventoryRepo.findAll();
+        // Item D: Exclude freshnessHistory from GET /cloud-sync/inventory responses (served only through /history)
+        for (CloudInventoryItem item : all) {
+            item.setFreshnessHistory(null);
+        }
+        return all;
     }
 
     @PostMapping("/inventory")
@@ -67,10 +74,19 @@ public class CloudSyncController {
         }
 
         CloudInventoryItem existing = inventoryRepo.findById(item.getId()).orElse(null);
+
+        // Item D: Keep stored history and ignore any history sent by the client; only server appends points
+        if (existing != null && existing.getFreshnessHistory() != null) {
+            item.setFreshnessHistory(new ArrayList<>(existing.getFreshnessHistory()));
+        } else {
+            item.setFreshnessHistory(new ArrayList<>());
+        }
+
         appendFreshnessPointIfChanged(item, existing);
 
         CloudInventoryItem saved = inventoryRepo.save(item);
         triggerWatchlistCheck(saved);
+        saved.setFreshnessHistory(null);
         return saved;
     }
 
@@ -88,6 +104,14 @@ public class CloudSyncController {
                     item.setCreatedAt(Instant.now());
                 }
                 CloudInventoryItem existing = inventoryRepo.findById(item.getId()).orElse(null);
+
+                // Item D: Keep stored history and ignore client-provided history
+                if (existing != null && existing.getFreshnessHistory() != null) {
+                    item.setFreshnessHistory(new ArrayList<>(existing.getFreshnessHistory()));
+                } else {
+                    item.setFreshnessHistory(new ArrayList<>());
+                }
+
                 appendFreshnessPointIfChanged(item, existing);
                 validItems.add(item);
             } else {
@@ -97,6 +121,7 @@ public class CloudSyncController {
         List<CloudInventoryItem> saved = inventoryRepo.saveAll(validItems);
         for (CloudInventoryItem item : saved) {
             triggerWatchlistCheck(item);
+            item.setFreshnessHistory(null);
         }
         return saved;
     }
@@ -120,6 +145,14 @@ public class CloudSyncController {
                     item.setCreatedAt(Instant.now());
                 }
                 CloudInventoryItem existing = inventoryRepo.findById(item.getId()).orElse(null);
+
+                // Item D: Keep stored history and ignore client-provided history
+                if (existing != null && existing.getFreshnessHistory() != null) {
+                    item.setFreshnessHistory(new ArrayList<>(existing.getFreshnessHistory()));
+                } else {
+                    item.setFreshnessHistory(new ArrayList<>());
+                }
+
                 appendFreshnessPointIfChanged(item, existing);
                 authorizedItems.add(item);
             } else {
@@ -130,6 +163,7 @@ public class CloudSyncController {
         List<CloudInventoryItem> saved = inventoryRepo.saveAll(authorizedItems);
         for (CloudInventoryItem item : saved) {
             triggerWatchlistCheck(item);
+            item.setFreshnessHistory(null);
         }
         return saved;
     }
@@ -386,12 +420,45 @@ public class CloudSyncController {
         return ResponseEntity.ok(orderRepo.save(order));
     }
 
+    @PostMapping("/inventory/{id}/discard")
+    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
+    public ResponseEntity<?> confirmDiscardItem(
+            @PathVariable String id,
+            @RequestParam(required = false) Double quantity,
+            Authentication auth) {
+        CloudInventoryItem item = inventoryRepo.findById(id).orElse(null);
+        if (item == null) {
+            return ResponseEntity.notFound().build();
+        }
+        if (!storeAuthService.isAuthorizedForStore(auth, item.getStoreId())) {
+            throw new AccessDeniedException("Unauthorized store access.");
+        }
+        double qtyToDiscard = (quantity != null && quantity > 0) ? quantity : item.getAvailable();
+        item.setDiscardedQuantity(item.getDiscardedQuantity() + qtyToDiscard);
+        item.setAvailable(Math.max(0, item.getAvailable() - qtyToDiscard));
+        item.setStatus("Discarded");
+
+        if (item.getFreshnessHistory() == null) {
+            item.setFreshnessHistory(new ArrayList<>());
+        }
+        FreshnessPoint.appendCapped(item.getFreshnessHistory(), FreshnessPoint.builder()
+                .timestamp(Instant.now())
+                .freshnessScore(item.getFreshnessScore())
+                .tier("EXPIRED")
+                .source(FreshnessPoint.FreshnessSource.MANUAL)
+                .build());
+
+        CloudInventoryItem saved = inventoryRepo.save(item);
+        saved.setFreshnessHistory(null);
+        return ResponseEntity.ok(saved);
+    }
+
     private void appendFreshnessPointIfChanged(CloudInventoryItem item, CloudInventoryItem existing) {
         if (item.getFreshnessHistory() == null) {
             item.setFreshnessHistory(new ArrayList<>());
         }
-        double score = item.getFreshnessScore() > 0 ? item.getFreshnessScore() : 0.85;
-        String tier = resolveTier(score, item.getDiscountPercent());
+        double score = item.getFreshnessScore() > 0 ? item.getFreshnessScore() : 0.95;
+        String tier = resolveTier(score, item.getExpiryDate());
 
         boolean isNew = existing == null || item.getFreshnessHistory().isEmpty();
         boolean changed = existing != null && (Math.abs(existing.getFreshnessScore() - item.getFreshnessScore()) > 0.001
@@ -407,12 +474,11 @@ public class CloudSyncController {
         }
     }
 
-    private String resolveTier(double score, int discount) {
-        if (score < 0.10) return "EXPIRED";
-        if (score < 0.30) return "TIER_3";
-        if (score < 0.50) return "TIER_2";
-        if (score < 0.70) return "TIER_1";
-        return "FRESH";
+    private String resolveTier(double score, String expiryDate) {
+        if (batchStateService.isExpiredDate(expiryDate)) {
+            return "EXPIRED";
+        }
+        return batchStateService.resolveState(score).name();
     }
 
     private void triggerWatchlistCheck(CloudInventoryItem item) {

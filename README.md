@@ -260,11 +260,11 @@ Public signup is available for customers, NGOs and store managers. A store manag
 
 | State | Freshness score | Discount |
 |-------|-----------------|----------|
-| FRESH | 0.70 and above | 0 % |
-| TIER_1 | 0.50 to 0.70 | 20 % |
-| TIER_2 | 0.30 to 0.50 | 40 % |
-| TIER_3 (urgent) | 0.10 to 0.30 | 60 % |
-| EXPIRED | below 0.10 | removed from the feed |
+| FRESH | 0.90 and above | 0 % |
+| TIER_1 | 0.85 to 0.90 | 20 % |
+| TIER_2 | 0.70 to 0.85 | 40 % |
+| TIER_3 (urgent) | 0.65 to 0.70 | 50 % |
+| EXPIRED | below 0.65 | not sellable (removed from feed) |
 
 Background jobs run inside the backend:
 

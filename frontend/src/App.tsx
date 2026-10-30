@@ -26,7 +26,7 @@ import {
   loadInventory, saveInventory, loadOrders, saveOrders, loadNotifications,
   saveNotifications, loadSettings, saveSettings, addReservation,
   fulfillPickupOrder, cancelPickupOrder, loadStores, saveStores, upsertStore,
-  calculateDistance, isSameCity, resolveCoordinates, clearAllData, setCurrentUserEmail, isItemForStore, loadMyOrders, isOrderForCustomer, deduplicateOrders, syncFromCloud, InventoryItem, StoreOrder,
+  calculateDistance, isSameCity, resolveCoordinates, clearAllData, setCurrentUserEmail, isItemForStore, loadMyOrders, isOrderForCustomer, deduplicateOrders, syncFromCloud, confirmDiscardInventoryItem, InventoryItem, StoreOrder,
   AppNotification, UserSettings, RegisteredStore, DEFAULT_SETTINGS
 } from "@/data/mockStore";
 
@@ -35,7 +35,7 @@ import { ProductDetailModal } from "@/components/modals/ProductDetailModal";
 import { EditBatchModal } from "@/components/modals/EditBatchModal";
 import { ReceiptModal } from "@/components/modals/ReceiptModal";
 import { WatchlistModal } from "@/components/modals/WatchlistModal";
-import { nextPriceDrop, formatTimeRemaining } from "@/config/tierConfig";
+import { nextPriceDrop, formatTimeRemaining, TIER_CONFIG, isPrintedDateInPast } from "@/config/tierConfig";
 import LiveMapView from "@/components/LiveMapView";
 import ESGDashboard from "@/components/ESGDashboard";
 
@@ -147,8 +147,17 @@ function Logo({ dark = false }: { dark?: boolean }) {
 
 function StatusBadge({ label }: { label: string }) {
   const norm = (label || "").toLowerCase();
-  if (norm.includes("expir") || norm.includes("tier_3") || norm.includes("tier_2") || norm.includes("urgent")) {
+  if (norm.includes("discard recommended") || norm === "expired") {
+    return <span className="ss-chip" style={{ background: "#FEECE8", color: "#C53030", borderColor: "#FEB2B2", fontWeight: 700 }}>Discard recommended</span>;
+  }
+  if (norm.includes("discarded")) {
+    return <span className="ss-chip" style={{ background: "#EDF2F7", color: "#4A5568", borderColor: "#CBD5E0", fontWeight: 600 }}>Discarded</span>;
+  }
+  if (norm.includes("expir") || norm.includes("tier_3") || norm.includes("urgent")) {
     return <span className="ss-chip badge-expiring">Expiring soon</span>;
+  }
+  if (norm.includes("tier_2")) {
+    return <span className="ss-chip" style={{ background: "#FEF3C7", color: "#92400E", borderColor: "#FDE68A" }}>Discounted (-40%)</span>;
   }
   if (norm.includes("avail") || norm.includes("fresh") || norm.includes("tier_1")) {
     return <span className="ss-chip badge-available">Available</span>;
@@ -1544,7 +1553,12 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
               </tr>
             </thead>
             <tbody>
-              {filtered.map(item => (
+              {filtered.map(item => {
+                const isExpired = item.status === "Discard recommended" || item.status === "Expired" || isPrintedDateInPast(item.expiryDate) || (typeof item.freshnessScore === "number" && item.freshnessScore < TIER_CONFIG.expiredMax);
+                const isDiscarded = item.status === "Discarded";
+                const displayStatus = isDiscarded ? "Discarded" : isExpired ? "Discard recommended" : item.status;
+
+                return (
                 <tr key={item.id} className="hover:bg-[#FAF8F5] dark:hover:bg-[#25302D] transition-colors">
                   <td>
                     <div className="flex items-center gap-3">
@@ -1559,6 +1573,9 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
                   </td>
                   <td className="font-semibold text-[#2E221F] dark:text-[#F0F4F2]">
                     {item.available} {item.unit}
+                    {isDiscarded && item.discardedQuantity ? (
+                      <span className="block text-[10px] text-gray-500">({item.discardedQuantity} discarded)</span>
+                    ) : null}
                   </td>
                   <td>
                     <div className="text-xs">
@@ -1574,7 +1591,7 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
                     </div>
                   </td>
                   <td>
-                    <StatusBadge label={item.status} />
+                    <StatusBadge label={displayStatus} />
                   </td>
                   <td className="text-xs text-[#554F4A] dark:text-[#CBD5E1]">
                     <div className="flex items-center gap-1.5">
@@ -1589,7 +1606,21 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
                   </td>
                   <td className="text-right">
                     <div className="inline-flex items-center gap-1.5">
-                      {item.expiryHoursLeft <= 6 && item.discountPercent < 50 && (
+                      {isExpired && !isDiscarded && (
+                        <button
+                          type="button"
+                          title="Confirm discarded - records discarded quantity without deleting"
+                          onClick={() => {
+                            confirmDiscardInventoryItem(item.id, item.available);
+                            onAction(`Recorded ${item.available} ${item.unit} of ${item.name} as discarded.`, "warning");
+                          }}
+                          className="px-2 py-1 rounded bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800 text-[10px] font-bold hover:bg-red-600 hover:text-white transition-all cursor-pointer flex items-center gap-1"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          <span>Confirm discarded</span>
+                        </button>
+                      )}
+                      {!isExpired && item.expiryHoursLeft <= 6 && item.discountPercent < 50 && (
                         <button
                           title="Apply 50% Emergency Discount"
                           onClick={() => handleQuickEmergencyDiscount(item)}
@@ -1622,7 +1653,7 @@ function InventoryPage({ onAction, onOpenSettings }: { onAction: (message: strin
                     </div>
                   </td>
                 </tr>
-              ))}
+              );})}
               {inventory.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-16 text-center">
@@ -3015,7 +3046,12 @@ function NgoOverview({ onAction, onOpenSettings }: { onAction: (message: string,
                   const matchedStore = stores.find(s => s.name.toLowerCase() === item.store.toLowerCase());
                   if (matchedStore?.city && !isSameCity(userCity, matchedStore.city)) return false;
                 }
-                return item.available > 0;
+                // Item B Safety Rule: EXPIRED items are never listed for sale
+                if (item.available <= 0) return false;
+                if (item.status === "Discarded" || item.status === "Discard recommended" || item.status === "Expired") return false;
+                if (isPrintedDateInPast(item.expiryDate)) return false;
+                if (typeof item.freshnessScore === "number" && item.freshnessScore < TIER_CONFIG.expiredMax) return false;
+                return true;
               });
 
               if (availableInCity.length === 0) {
@@ -3289,6 +3325,12 @@ function NgoAvailableFood({ onAction, onOpenSettings }: { onAction: (message: st
   const cityFilteredInventory = inventory.filter(item => {
     // Multi-city boundary: user in City A cannot see items in City B
     if (!isItemInUserCity(item.storeCity, item.store)) return false;
+
+    // Safety rule: EXPIRED items are never listed for sale
+    if (item.available <= 0) return false;
+    if (item.status === "Discarded" || item.status === "Discard recommended" || item.status === "Expired") return false;
+    if (isPrintedDateInPast(item.expiryDate)) return false;
+    if (typeof item.freshnessScore === "number" && item.freshnessScore < TIER_CONFIG.expiredMax) return false;
 
     // Distance / radius check using Haversine algorithm
     const dist = calculateDistance(

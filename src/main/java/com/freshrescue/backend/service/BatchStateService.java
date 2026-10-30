@@ -52,6 +52,38 @@ public class BatchStateService {
         this.tier3Percent = tier3Percent;
     }
 
+    public double getTier1Max() { return tier1Max; }
+    public double getTier2Max() { return tier2Max; }
+    public double getTier3Max() { return tier3Max; }
+    public double getExpiredMax() { return expiredMax; }
+    public int getTier1Percent() { return tier1Percent; }
+    public int getTier2Percent() { return tier2Percent; }
+    public int getTier3Percent() { return tier3Percent; }
+
+    /**
+     * Checks if a printed expiry date string is in the past.
+     */
+    public boolean isExpiredDate(String dateStr) {
+        if (dateStr == null || dateStr.isBlank()) return false;
+        String trimmed = dateStr.trim();
+        try {
+            if (trimmed.length() >= 10 && trimmed.charAt(4) == '-' && trimmed.charAt(7) == '-') {
+                java.time.LocalDate date = java.time.LocalDate.parse(trimmed.substring(0, 10));
+                return date.isBefore(java.time.LocalDate.now());
+            }
+            if (trimmed.length() >= 10 && (trimmed.charAt(2) == '/' || trimmed.charAt(2) == '-')) {
+                java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter.ofPattern(
+                        trimmed.charAt(2) == '/' ? "dd/MM/yyyy" : "dd-MM-yyyy");
+                java.time.LocalDate date = java.time.LocalDate.parse(trimmed.substring(0, 10), fmt);
+                return date.isBefore(java.time.LocalDate.now());
+            }
+            java.time.Instant inst = java.time.Instant.parse(trimmed);
+            return inst.isBefore(java.time.Instant.now());
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     /**
      * Given a batch's latest freshness score, returns what state it should be in.
      * Pure function - does not mutate or save the batch. Caller decides what to do
@@ -63,6 +95,13 @@ public class BatchStateService {
         if (freshnessScore < tier2Max) return Batch.BatchState.TIER_2;
         if (freshnessScore < tier1Max) return Batch.BatchState.TIER_1;
         return Batch.BatchState.FRESH;
+    }
+
+    public Batch.BatchState resolveState(double freshnessScore, String printedExpiryDate) {
+        if (isExpiredDate(printedExpiryDate)) {
+            return Batch.BatchState.EXPIRED;
+        }
+        return resolveState(freshnessScore);
     }
 
     public Integer resolveDiscountPercent(Batch.BatchState state) {
@@ -82,7 +121,12 @@ public class BatchStateService {
      */
     public boolean applyTransition(Batch batch, double newFreshnessScore) {
         Batch.BatchState oldState = batch.getState();
-        Batch.BatchState newState = resolveState(newFreshnessScore);
+        boolean pastPrintedExpiry = isExpiredDate(batch.getOcrExtractedDate())
+                || (batch.getPredictedExpiryDate() != null && batch.getPredictedExpiryDate().isBefore(java.time.Instant.now()));
+
+        Batch.BatchState newState = pastPrintedExpiry
+                ? Batch.BatchState.EXPIRED
+                : resolveState(newFreshnessScore);
 
         batch.setFreshnessScore(newFreshnessScore);
         batch.setState(newState);
@@ -90,8 +134,8 @@ public class BatchStateService {
 
         boolean changed = oldState != newState;
         if (changed) {
-            log.info("Batch {} transitioned {} -> {} (score={})",
-                    batch.getId(), oldState, newState, newFreshnessScore);
+            log.info("Batch {} transitioned {} -> {} (score={}, pastPrintedExpiry={})",
+                    batch.getId(), oldState, newState, newFreshnessScore, pastPrintedExpiry);
         }
         return changed;
     }

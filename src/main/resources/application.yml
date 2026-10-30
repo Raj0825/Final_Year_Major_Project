@@ -27,15 +27,19 @@ jwt:
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
 
+app:
+  pricing:
+    decay-per-hour: 0.01
+
 freshness:
   tiers:
-    tier1-max: 0.70
-    tier2-max: 0.50
-    tier3-max: 0.30
-    expired-max: 0.10
+    tier1-max: 0.90
+    tier2-max: 0.85
+    tier3-max: 0.70
+    expired-max: 0.65
   discount:
     tier1-percent: 20
     tier2-percent: 40
-    tier3-percent: 60
-  decay-per-hour: 0.01
+    tier3-percent: 50
+  decay-per-hour: ${app.pricing.decay-per-hour:0.01}
   reservation-hold-minutes: 15

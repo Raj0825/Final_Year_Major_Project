@@ -11,16 +11,16 @@ import java.util.Map;
 @RequestMapping("/api/config")
 public class ConfigController {
 
-    @Value("${freshness.tiers.tier1-max:0.70}")
+    @Value("${freshness.tiers.tier1-max:0.90}")
     private double tier1Max;
 
-    @Value("${freshness.tiers.tier2-max:0.50}")
+    @Value("${freshness.tiers.tier2-max:0.85}")
     private double tier2Max;
 
-    @Value("${freshness.tiers.tier3-max:0.30}")
+    @Value("${freshness.tiers.tier3-max:0.70}")
     private double tier3Max;
 
-    @Value("${freshness.tiers.expired-max:0.10}")
+    @Value("${freshness.tiers.expired-max:0.65}")
     private double expiredMax;
 
     @Value("${freshness.discount.tier1-percent:20}")
@@ -29,10 +29,10 @@ public class ConfigController {
     @Value("${freshness.discount.tier2-percent:40}")
     private int tier2Percent;
 
-    @Value("${freshness.discount.tier3-percent:60}")
+    @Value("${freshness.discount.tier3-percent:50}")
     private int tier3Percent;
 
-    @Value("${freshness.decay-per-hour:0.01}")
+    @Value("${app.pricing.decay-per-hour:${freshness.decay-per-hour:0.01}}")
     private double decayPerHour;
 
     @GetMapping("/tiers")

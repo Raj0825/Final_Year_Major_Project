@@ -31,7 +31,7 @@ export interface InventoryItem {
   originalPrice: number;
   currentPrice: number;
   discountPercent: number;
-  status: "Available" | "Expiring soon" | "Reserved";
+  status: "Available" | "Expiring soon" | "Reserved" | "Discard recommended" | "Discarded" | "Expired";
   expiry: string;
   expiryDate?: string;       // ISO date string yyyy-mm-dd
   expiryHoursLeft: number;
@@ -45,6 +45,7 @@ export interface InventoryItem {
   distance: string;
   freshnessScore: number;
   storageTip?: string;
+  discardedQuantity?: number;
   freshnessHistory?: FreshnessHistoryPoint[];
 }
 
@@ -703,6 +704,26 @@ export function deleteInventoryItem(id: string) {
   saveInventory(current);
   if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
     api.delete(`/cloud-sync/inventory/${id}`).catch(() => {});
+  }
+}
+
+export function confirmDiscardInventoryItem(id: string, qty?: number) {
+  const current = loadInventory();
+  const updated = current.map(item => {
+    if (item.id === id) {
+      const discardAmt = typeof qty === "number" && qty > 0 ? qty : item.available;
+      return {
+        ...item,
+        discardedQuantity: (item.discardedQuantity || 0) + discardAmt,
+        available: Math.max(0, item.available - discardAmt),
+        status: "Discarded" as const
+      };
+    }
+    return item;
+  });
+  saveInventory(updated);
+  if (typeof localStorage !== "undefined" && localStorage.getItem("fr_token")) {
+    api.post(`/cloud-sync/inventory/${id}/discard${qty ? `?quantity=${qty}` : ""}`).catch(() => {});
   }
 }
 

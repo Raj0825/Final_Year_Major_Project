@@ -131,10 +131,10 @@ export default function BatchDetailPage() {
           <button
             type="button"
             className={`btn btn-sm${batch.state === "TIER_3" ? " btn-danger" : " btn-secondary"}`}
-            onClick={() => handleSetTier("TIER_3", 60)}
+            onClick={() => handleSetTier("TIER_3", 50)}
             disabled={updatingTier}
           >
-            🔴 Tier 3 (-60% Urgent 🔥)
+            🔴 Tier 3 (-50% Urgent 🔥)
           </button>
           <button
             type="button"
