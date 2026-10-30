@@ -54,7 +54,7 @@ Three separate programs run together: the **frontend**, the **backend**, and the
 |-------|------------|
 | Backend | Java 17, Spring Boot 3.3.4, Spring Security (JWT), Spring Data MongoDB, Spring Validation, WebClient |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS 4, Axios, wouter, Leaflet (maps), Recharts, `qrcode.react` |
-| ML service | Python, FastAPI, TensorFlow / Keras (MobileNetV2 fruit freshness model) |
+| ML service | Python, FastAPI, TensorFlow / Keras (3-class fruit freshness model) |
 | Database | MongoDB |
 | Deployment | Docker (backend), Vercel (frontend) |
 
@@ -90,8 +90,9 @@ freshrescue-backend/                 <- repository root
 |
 +-- ml_service/                      Python FastAPI freshness service
     +-- app.py                       /predict and /health endpoints
+    +-- test_model.py                CLI script to evaluate test images
     +-- requirements.txt
-    +-- fruit_freshness_model.h5     Trained Keras model
+    +-- fruit_freshness_model.keras  Trained Keras 3 model (3 classes: fresh, rotten, semifresh)
     +-- run_ml.bat                   Windows shortcut to start the service
 ```
 
@@ -309,7 +310,7 @@ A small FastAPI app in `ml_service/` that scores freshness from a photo.
 
 - `GET /health` (also `/`): service status and the model's classes.
 - `POST /predict`: multipart upload with the field name `image`. Returns a freshness score and a predicted number of days to expiry, plus confidence information.
-- The model is a MobileNetV2 trained on a fruit freshness dataset covering fresh and rotten apples, bananas and oranges.
+- The model is a Keras 3 CNN (`fruit_freshness_model.keras`) trained on 3 freshness classes: `fresh`, `rotten`, and `semifresh`.
 - Expiry-date OCR is not implemented yet, so the extracted date is always empty.
 
 The backend calls it at `ML_SERVICE_URL`. If the service is down or the call fails, the batch is flagged for manual review instead of guessing a score.
@@ -371,7 +372,7 @@ On **Vercel**: import the repository, set the root directory to `frontend`, and 
 
 ## Known limitations
 
-- Expiry-date OCR is not implemented; freshness comes from the CNN model only, and it is trained on apples, bananas and oranges.
+- Expiry-date OCR is not implemented; freshness comes from the CNN model only, and it is trained on 3 produce classes (`fresh`, `rotten`, `semifresh`).
 - The web app keeps part of its inventory and store state in the browser and syncs it through the `/cloud-sync` endpoints, alongside the main REST endpoints. Moving everything onto the REST endpoints is planned.
 - Store staff accounts cannot be created through public signup, and there is no screen yet for a manager to add staff.
 - There are no automated tests yet.

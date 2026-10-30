@@ -12,6 +12,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 venv/
+.keras/
 /fruit_freshness_model.h5
 .env
 

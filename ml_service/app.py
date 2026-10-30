@@ -3,6 +3,7 @@ import os
 # TensorFlow configuration — must be set before importing TensorFlow
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ.setdefault("KERAS_HOME", os.path.join(os.path.dirname(__file__), ".keras"))
 
 import io
 import logging
@@ -52,19 +53,22 @@ app.add_middleware(
 # ============================================================
 
 CLASS_NAMES = [
-    "freshapples",    # 0
-    "freshbanana",    # 1
-    "freshoranges",   # 2
-    "rottenapples",   # 3
-    "rottenbanana",   # 4
-    "rottenoranges"   # 5
+    "fresh",       # 0
+    "rotten",      # 1
+    "semifresh"    # 2
 ]
+
+ANCHOR_SCORES = {
+    "fresh": 1.00,
+    "semifresh": 0.78,
+    "rotten": 0.30,
+}
 
 EXPECTED_CLASSES = len(CLASS_NAMES)
 
 MODEL_PATH = os.path.join(
     os.path.dirname(__file__),
-    "fruit_freshness_model.h5"
+    "fruit_freshness_model.keras"
 )
 
 
@@ -112,7 +116,7 @@ def health_check():
     return {
         "status": "online",
         "service": "FreshRescue CNN Freshness Service",
-        "model": "MobileNetV2 Fruit Freshness",
+        "model": "Fruit Freshness CNN (Keras 3)",
         "classes": CLASS_NAMES,
         "input_shape": list(model.input_shape),
         "output_classes": int(model.output_shape[-1])
@@ -189,20 +193,14 @@ async def predict_freshness(image: UploadFile = File(...)):
         # ----------------------------------------------------
         # 5. Convert image to NumPy array
         #
-        # IMPORTANT:
-        # This assumes your model was trained using:
-        #
-        #     rescale=1./255
-        #
-        # or equivalent [0,1] preprocessing.
+        # RAW float32 pixel values 0-255: the model contains its
+        # own internal Rescaling layer.
         # ----------------------------------------------------
 
         img_array = np.asarray(
             resized_img,
             dtype=np.float32
         )
-
-        img_array = img_array / 255.0
 
 
         # ----------------------------------------------------
@@ -272,91 +270,52 @@ async def predict_freshness(image: UploadFile = File(...)):
 
 
         # ----------------------------------------------------
-        # 11. Calculate fresh vs rotten probability
+        # 11. Extract 3-class probabilities directly
         # ----------------------------------------------------
 
-        fresh_prob = float(
-            predictions[0]
-            + predictions[1]
-            + predictions[2]
-        )
-
-        rotten_prob = float(
-            predictions[3]
-            + predictions[4]
-            + predictions[5]
-        )
+        class_idx = {name: i for i, name in enumerate(CLASS_NAMES)}
+        fresh_prob = float(predictions[class_idx["fresh"]])
+        rotten_prob = float(predictions[class_idx["rotten"]])
+        semifresh_prob = float(predictions[class_idx["semifresh"]])
 
 
         # ----------------------------------------------------
-        # 12. Calculate freshness score
-        #
-        # 1.00 = completely fresh according to model
-        # 0.00 = completely rotten according to model
+        # 12. Calculate freshness score using anchor scores
         # ----------------------------------------------------
-
-        total = fresh_prob + rotten_prob
-
-        if total > 0:
-
-            freshness_score = (
-                    fresh_prob / total
-            )
-
-        else:
-
-            freshness_score = 0.50
-
 
         freshness_score = round(
-            float(freshness_score),
+            float(sum(predictions[i] * ANCHOR_SCORES[cls] for i, cls in enumerate(CLASS_NAMES))),
             2
         )
 
 
         # ----------------------------------------------------
-        # 13. Determine confidence level
+        # 13. Determine confidence level and manual review flag
         # ----------------------------------------------------
 
         if confidence >= 0.80:
-
             confidence_level = "high"
-
         elif confidence >= 0.60:
-
             confidence_level = "medium"
-
         else:
-
             confidence_level = "low"
 
+        needs_manual_review = bool(confidence < 0.60)
+
 
         # ----------------------------------------------------
-        # 14. Estimate shelf life
-        #
-        # IMPORTANT:
-        # This is a BUSINESS RULE based on freshness score.
-        # The CNN itself does NOT directly predict days.
+        # 14. Estimate shelf life (business rule placeholder)
         # ----------------------------------------------------
 
-        if freshness_score >= 0.80:
-
+        if freshness_score >= 0.90:
             days_to_expiry = 7
-
-        elif freshness_score >= 0.60:
-
+        elif freshness_score >= 0.85:
             days_to_expiry = 5
-
-        elif freshness_score >= 0.40:
-
+        elif freshness_score >= 0.70:
             days_to_expiry = 3
-
-        elif freshness_score >= 0.20:
-
+        elif freshness_score >= 0.65:
             days_to_expiry = 1
-
         else:
-
             days_to_expiry = 0
 
 
@@ -367,7 +326,6 @@ async def predict_freshness(image: UploadFile = File(...)):
         class_probabilities = {}
 
         for i, class_name in enumerate(CLASS_NAMES):
-
             class_probabilities[class_name] = round(
                 float(predictions[i]),
                 4
@@ -384,9 +342,11 @@ async def predict_freshness(image: UploadFile = File(...)):
             f"confidence={confidence:.2f}, "
             f"freshnessScore={freshness_score:.2f}, "
             f"freshProbability={fresh_prob:.2f}, "
+            f"semifreshProbability={semifresh_prob:.2f}, "
             f"rottenProbability={rotten_prob:.2f}, "
             f"days={days_to_expiry}, "
-            f"confidenceLevel={confidence_level}"
+            f"confidenceLevel={confidence_level}, "
+            f"needsManualReview={needs_manual_review}"
         )
 
 
@@ -395,35 +355,19 @@ async def predict_freshness(image: UploadFile = File(...)):
         # ----------------------------------------------------
 
         return {
-
             # Existing Spring Boot fields
             "freshnessScore": freshness_score,
-
             "predictedDaysToExpiry": days_to_expiry,
-
             "ocrExtractedDate": None,
-
 
             # Additional ML information
             "predictedClass": top_class,
-
-            "confidence": round(
-                confidence,
-                2
-            ),
-
+            "confidence": round(confidence, 2),
             "confidenceLevel": confidence_level,
-
-            "freshProbability": round(
-                fresh_prob,
-                2
-            ),
-
-            "rottenProbability": round(
-                rotten_prob,
-                2
-            ),
-
+            "needsManualReview": needs_manual_review,
+            "freshProbability": round(fresh_prob, 2),
+            "semifreshProbability": round(semifresh_prob, 2),
+            "rottenProbability": round(rotten_prob, 2),
             "classProbabilities": class_probabilities
         }
 

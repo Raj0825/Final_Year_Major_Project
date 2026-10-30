@@ -19,10 +19,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A batch's freshness score should keep decaying even if staff don't re-photograph it
- * every day - otherwise a batch scanned once on day 0 would sit at "FRESH" forever.
- * This job runs periodically and nudges scores down based on time-since-last-update,
- * as a stand-in for a "real" re-scan, then runs the result through the same state
+ * A batch's freshness score should keep decaying even if staff don't
+ * re-photograph it
+ * every day - otherwise a batch scanned once on day 0 would sit at "FRESH"
+ * forever.
+ * This job runs periodically and nudges scores down based on
+ * time-since-last-update,
+ * as a stand-in for a "real" re-scan, then runs the result through the same
+ * state
  * machine used for actual ML predictions.
  */
 @Slf4j
@@ -46,8 +50,7 @@ public class DiscountEngineService {
             ListingService listingService,
             NotificationService notificationService,
             WatchlistService watchlistService,
-            @Value("${app.pricing.decay-per-hour:${freshness.decay-per-hour:0.01}}") double decayPerHour
-    ) {
+            @Value("${app.pricing.decay-per-hour:${freshness.decay-per-hour:0.01}}") double decayPerHour) {
         this.batchRepository = batchRepository;
         this.cloudInventoryRepo = cloudInventoryRepo;
         this.storeRepository = storeRepository;

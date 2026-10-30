@@ -93,8 +93,7 @@ class BatchStateServiceTest {
 
         BatchStateService realConfigService = new BatchStateService(
                 tier1Max, tier2Max, tier3Max, expiredMax,
-                tier1Discount, tier2Discount, tier3Discount
-        );
+                tier1Discount, tier2Discount, tier3Discount);
 
         // Boundary cases:
         // 0.649 EXPIRED
