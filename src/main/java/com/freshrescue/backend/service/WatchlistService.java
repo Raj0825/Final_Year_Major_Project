@@ -78,9 +78,7 @@ public class WatchlistService {
         watchRepository.deleteById(watchId);
     }
 
-    /**
-     * Checks all watches matching an item when it is newly listed or its price/discount drops.
-     */
+
     public void checkItemAgainstWatches(String itemId,
                                        String productName,
                                        String category,

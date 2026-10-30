@@ -11,15 +11,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.Optional;
 
-/**
- * Thin client around the Python ML microservice (FastAPI, running the CNN freshness
- * model + OCR). Spring Boot is the only thing that talks to it directly - React never
- * calls it, see BatchController#scanBatch.
- *
- * While the CNN is still being trained (see /areas note on dataset sourcing), point
- * ml.service.base-url at a stub FastAPI app that returns randomized/fixed values in the
- * same JSON shape, so backend + frontend work isn't blocked.
- */
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -55,10 +47,7 @@ public class MlPredictionService {
             return Optional.ofNullable(response);
         } catch (Exception e) {
             log.error("ML service call failed - flagging batch for manual review instead of guessing a score", e);
-            // Fail-safe: if the ML service is down, don't block staff from recording a scan,
-            // but don't fabricate a freshness score either - a wrong guess here can silently
-            // discount (or fail to discount) real inventory. BatchService flags the batch as
-            // needsManualReview and leaves its state/discount untouched.
+
             return Optional.empty();
         }
     }

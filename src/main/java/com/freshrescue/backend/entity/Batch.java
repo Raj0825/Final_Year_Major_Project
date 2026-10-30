@@ -13,14 +13,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * A batch of produce stocked by a store. This is the "source of truth" that the
- * CNN/OCR pipeline updates, and that the state-machine (BatchStateService) transitions
- * through FRESH -> TIER_1 -> TIER_2 -> TIER_3 -> EXPIRED as freshnessScore decays.
- *
- * A Listing is derived from a Batch (see Listing.java) - Batch holds store-internal
- * detail, Listing is the buyer-facing projection of it.
- */
+
 @Data
 @Builder
 @NoArgsConstructor

@@ -5,22 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-/**
- * Implements the freshness-score -> discount-tier state machine described in the
- * project plan:
- *
- *   FRESH -> TIER_1 (20%) -> TIER_2 (40%) -> TIER_3 (60%, urgent) -> EXPIRED
- *
- * This is called from two places:
- *   1) BatchService, right after a new freshnessScore comes back from MlPredictionService
- *   2) DiscountEngineService's scheduled job, which re-evaluates scores that may have
- *      decayed further even without a new scan
- *
- * Kept as its own class (rather than inline in BatchService) because the tier
- * thresholds and the transition logic are exactly the kind of thing that changes
- * during development/tuning - isolating it makes that safe to edit without touching
- * persistence or API code.
- */
+
 @Slf4j
 @Service
 public class BatchStateService {
@@ -60,9 +45,7 @@ public class BatchStateService {
     public int getTier2Percent() { return tier2Percent; }
     public int getTier3Percent() { return tier3Percent; }
 
-    /**
-     * Checks if a printed expiry date string is in the past.
-     */
+
     public boolean isExpiredDate(String dateStr) {
         if (dateStr == null || dateStr.isBlank()) return false;
         String trimmed = dateStr.trim();
@@ -84,11 +67,7 @@ public class BatchStateService {
         }
     }
 
-    /**
-     * Given a batch's latest freshness score, returns what state it should be in.
-     * Pure function - does not mutate or save the batch. Caller decides what to do
-     * with the result (e.g. skip the update entirely if state hasn't changed).
-     */
+
     public Batch.BatchState resolveState(double freshnessScore) {
         if (freshnessScore < expiredMax) return Batch.BatchState.EXPIRED;
         if (freshnessScore < tier3Max) return Batch.BatchState.TIER_3;
@@ -114,11 +93,7 @@ public class BatchStateService {
         };
     }
 
-    /**
-     * Applies the new state + discount to the batch in place. Returns true if the
-     * state actually changed (so callers know whether to fire notifications / update
-     * the Listing / log a transition event).
-     */
+
     public boolean applyTransition(Batch batch, double newFreshnessScore) {
         Batch.BatchState oldState = batch.getState();
         boolean pastPrintedExpiry = isExpiredDate(batch.getOcrExtractedDate())

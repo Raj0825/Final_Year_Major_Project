@@ -46,17 +46,7 @@ public class BatchService {
         return saved;
     }
 
-    /**
-     * Core flow: staff uploads a new photo of an existing batch.
-     *   1) send image to the ML service (CNN freshness + OCR)
-     *   2) run the result through the state machine
-     *   3) persist the batch
-     *   4) if the tier changed, sync (create/update/remove) the buyer-facing Listing
-     *   5) if it crossed into TIER_2/TIER_3, trigger notifications
-     *
-     * This is the single method that ties the whole pipeline together - everything
-     * else (controllers, scheduled jobs) just calls into this or BatchStateService directly.
-     */
+
     public Batch scanBatch(String batchId, byte[] imageBytes, String filename) {
         Batch batch = batchRepository.findById(batchId)
                 .orElseThrow(() -> new IllegalArgumentException("Batch not found: " + batchId));

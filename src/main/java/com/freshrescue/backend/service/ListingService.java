@@ -41,10 +41,7 @@ public class ListingService {
     @Value("${freshness.discount.tier3-percent:60}")
     private int tier3Percent;
 
-    /**
-     * Keeps the buyer-facing Listing in sync with its parent Batch's state.
-     * All batches with available quantity > 0 and not EXPIRED are listed.
-     */
+
     public void syncListingForBatch(Batch batch) {
         if (batch == null || batch.getId() == null)
             return;
@@ -129,11 +126,7 @@ public class ListingService {
         }
     }
 
-    /**
-     * Buyer App feed: listings within radiusKm of the buyer's location, closest
-     * first.
-     * Falls back cleanly if 2dsphere index is absent or no listings match distance.
-     */
+
     public List<Listing> findNearby(double longitude, double latitude, double radiusKm) {
         try {
             NearQuery nearQuery = NearQuery.near(new GeoJsonPoint(longitude, latitude))
@@ -165,10 +158,7 @@ public class ListingService {
         return listingRepository.findAll();
     }
 
-    /**
-     * Automatically sync all active batches in MongoDB to listings on startup
-     * so newly added or existing items immediately appear for buyers.
-     */
+
     @EventListener(ApplicationReadyEvent.class)
     public void syncAllBatchesOnStartup() {
         try {

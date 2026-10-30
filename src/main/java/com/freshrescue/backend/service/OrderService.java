@@ -224,11 +224,6 @@ public class OrderService {
         return fulfilled;
     }
 
-    /**
-     * Scheduled job (see ReservationExpiryService) calls this for any RESERVED order
-     * whose hold has expired without payment/fulfillment - releases the quantity back
-     * to the listing so it re-enters the feed.
-     */
     public void expireReservation(Order order) {
         if (order == null || order.getId() == null) return;
 

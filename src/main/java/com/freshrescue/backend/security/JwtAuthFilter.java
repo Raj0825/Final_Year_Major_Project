@@ -15,12 +15,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.List;
 
-/**
- * Reads the "Authorization: Bearer <token>" header, validates it, and - if valid -
- * populates the SecurityContext with the user's id (as principal) and role (as a
- * GrantedAuthority, e.g. "ROLE_STORE_MANAGER") so @PreAuthorize("hasRole('STORE_MANAGER')")
- * works on controller methods.
- */
+
 @Component
 @RequiredArgsConstructor
 public class JwtAuthFilter extends OncePerRequestFilter {

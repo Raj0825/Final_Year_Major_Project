@@ -18,17 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * A batch's freshness score should keep decaying even if staff don't
- * re-photograph it
- * every day - otherwise a batch scanned once on day 0 would sit at "FRESH"
- * forever.
- * This job runs periodically and nudges scores down based on
- * time-since-last-update,
- * as a stand-in for a "real" re-scan, then runs the result through the same
- * state
- * machine used for actual ML predictions.
- */
+
 @Slf4j
 @Service
 public class DiscountEngineService {
@@ -80,8 +70,7 @@ public class DiscountEngineService {
                 estimatedScore = Math.max(0, batch.getFreshnessScore() - (hoursSinceUpdate * decayPerHour));
             }
 
-            // Time-to-expiry alignment with new bands:
-            // TIER_3: 0.65 <= score < 0.70; TIER_2: 0.70 <= score < 0.85; TIER_1: 0.85 <= score < 0.90
+
             if (batch.getPredictedExpiryDate() != null) {
                 long hoursUntilExpiry = Duration.between(Instant.now(), batch.getPredictedExpiryDate()).toHours();
                 if (hoursUntilExpiry <= 0) {
@@ -116,9 +105,7 @@ public class DiscountEngineService {
         }
     }
 
-    /**
-     * Scheduled decay job for cloud inventory items to maintain truthful price-drop counts.
-     */
+
     @Scheduled(fixedRate = 3_600_000)
     public void reEvaluateCloudInventory() {
         List<CloudInventoryItem> items = cloudInventoryRepo.findAll();

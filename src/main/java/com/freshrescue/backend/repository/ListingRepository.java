@@ -15,7 +15,5 @@ public interface ListingRepository extends MongoRepository<Listing, String> {
 
     List<Listing> findByUrgentTrue();
 
-    // Geospatial "near me" queries ($geoNear) are done via MongoTemplate in
-    // ListingService, not here - repository-derived $geoNear support is unreliable
-    // for aggregation-based sorting alongside other filters (category, tier, etc).
+
 }

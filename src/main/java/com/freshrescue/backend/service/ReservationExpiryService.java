@@ -16,8 +16,7 @@ public class ReservationExpiryService {
 
     private final OrderService orderService;
 
-    // Runs every minute - hold windows are short (default 15 min), so this needs to
-    // be fairly frequent to keep the buyer-facing feed's stock counts accurate.
+
     @Scheduled(fixedRate = 60_000)
     public void releaseExpiredHolds() {
         List<Order> expired = orderService.findExpiredHolds(Instant.now());

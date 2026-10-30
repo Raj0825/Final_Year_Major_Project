@@ -23,9 +23,7 @@ import java.util.List;
 
 @Configuration
 @RequiredArgsConstructor
-@EnableMethodSecurity // REQUIRED for @PreAuthorize to actually be enforced on controllers -
-// without this, Spring Security 6 silently ignores every @PreAuthorize
-// annotation and only the request-matcher rules below apply.
+@EnableMethodSecurity
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
