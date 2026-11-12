@@ -50,7 +50,7 @@ public class SecurityConfig {
      * CORS_ALLOWED_ORIGINS=https://final-year-major-project-ashen.vercel.app
      * Local development defaults are defined in application.yml.
      */
-    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000}")
+    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,https://final-year-major-project-ashen.vercel.app}")
     private List<String> allowedOrigins;
 
     @Bean
@@ -63,6 +63,7 @@ public class SecurityConfig {
         List<String> origins = allowedOrigins == null ? List.<String>of()
                 : allowedOrigins.stream()
                         .map(String::trim)
+                        .map(o -> o.replaceAll("/+$", ""))
                         .filter(o -> !o.isEmpty() && !o.equals("*")) // never allow a bare wildcard
                         .toList();
 
