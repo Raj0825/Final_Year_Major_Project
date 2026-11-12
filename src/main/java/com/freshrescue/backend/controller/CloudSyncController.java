@@ -38,7 +38,7 @@ import java.util.stream.Collectors;
  *
  * SECURITY CHANGES vs. the previous version:
  * - POST /orders is now customer/NGO only and CREATE-only. The client may send
- * only itemId, quantity,
+ * only listingId, quantity,
  * notes and pickupTime. id, qrCode, storeId, customerEmail and status are all
  * set by the server.
  * - Existing orders can no longer be overwritten through POST /orders (this was
@@ -55,9 +55,10 @@ import java.util.stream.Collectors;
  * - Status changes use an allowlist and an atomic "not already finished" guard.
  * - IDs are random UUIDs instead of timestamps.
  *
- * ASSUMPTIONS ABOUT CloudOrder (rename if your entity differs):
- * String id, qrCode, storeId, itemId, customerEmail, status, notes; double
- * quantity; pickupTime (any type)
+ * CloudOrder fields populated server-side on create:
+ * id, qrCode, storeId, listingId, productName, storeName, storeLocation,
+ * customerName, customerEmail, customerLocation, quantity, unit, priceAtOrder,
+ * status, reservedAt, pickupTime, notes.
  */
 @Slf4j
 @RestController
@@ -324,10 +325,10 @@ public class CloudSyncController {
     }
 
     /**
-     * Create an order (reservation). The client sends ONLY: itemId, quantity, and
-     * optionally notes / pickupTime.
-     * Everything else (id, qrCode, storeId, customerEmail, status) is decided by
-     * the server.
+     * Create an order (reservation). The client sends ONLY: listingId, quantity,
+     * and optionally notes / pickupTime / customerLocation.
+     * Everything else (id, qrCode, storeId, customerEmail, priceAtOrder, status)
+     * is set by the server.
      */
     @PostMapping("/orders")
     @PreAuthorize("hasAnyRole('CUSTOMER', 'NGO')")
@@ -337,8 +338,8 @@ public class CloudSyncController {
             throw new AccessDeniedException("Unknown user.");
         }
 
-        if (in.getItemId() == null || in.getItemId().isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "itemId is required."));
+        if (in.getListingId() == null || in.getListingId().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "listingId is required."));
         }
         double qty = in.getQuantity();
         if (Double.isNaN(qty) || Double.isInfinite(qty) || qty <= 0 || qty > MAX_ORDER_QUANTITY) {
@@ -346,19 +347,22 @@ public class CloudSyncController {
                     .body(Map.of("message", "Quantity must be between 0 and " + (int) MAX_ORDER_QUANTITY + "."));
         }
 
-        String itemId = in.getItemId().trim();
-        CloudInventoryItem current = inventoryRepo.findById(itemId).orElse(null);
+        String listingId = in.getListingId().trim();
+        CloudInventoryItem current = inventoryRepo.findById(listingId).orElse(null);
         if (current == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Item not found."));
         }
         if ("Discarded".equalsIgnoreCase(current.getStatus())
+                || "Discard recommended".equalsIgnoreCase(current.getStatus())
                 || batchStateService.isExpiredDate(current.getExpiryDate())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Item is no longer available."));
         }
 
-        // Atomic stock decrement: only succeeds if enough stock is still available
+        // Atomic stock decrement: only succeeds if enough stock is still available and not discarded
         CloudInventoryItem item = mongoTemplate.findAndModify(
-                Query.query(Criteria.where("id").is(itemId).and("available").gte(qty)),
+                Query.query(Criteria.where("id").is(listingId)
+                        .and("available").gte(qty)
+                        .and("status").nin("Discarded", "Discard recommended")),
                 new Update().inc("available", -qty),
                 FindAndModifyOptions.options().returnNew(true),
                 CloudInventoryItem.class);
@@ -370,15 +374,21 @@ public class CloudSyncController {
             CloudOrder order = new CloudOrder();
             order.setId("ord-" + UUID.randomUUID());
             order.setQrCode(UUID.randomUUID().toString()); // server-generated, unguessable
+            order.setCustomerName(user.getName());
             order.setCustomerEmail(user.getEmail().toLowerCase().trim());
+            order.setCustomerLocation(truncate(in.getCustomerLocation(), 200));
             order.setStoreId(item.getStoreId()); // from the DB, never from the client
-            order.setItemId(item.getId());
+            order.setListingId(item.getId());
+            order.setProductName(item.getName());
+            order.setStoreName(item.getStore());
+            order.setStoreLocation(item.getStoreLocation());
             order.setQuantity(qty);
+            order.setUnit(item.getUnit());
+            order.setPriceAtOrder(Math.round(item.getCurrentPrice() * qty * 100.0) / 100.0);
             order.setStatus(INITIAL_ORDER_STATUS); // never from the client
-            order.setPickupTime(in.getPickupTime());
+            order.setReservedAt(Instant.now().toString());
+            order.setPickupTime(truncate(in.getPickupTime(), 100));
             order.setNotes(truncate(in.getNotes(), MAX_NOTES_LENGTH));
-            // ADAPT: set the price from the DB item, never from the client, e.g.
-            // order.setTotalPrice(item.getCurrentPrice() * qty);
             return ResponseEntity.ok(orderRepo.save(order));
         } catch (RuntimeException e) {
             restoreStock(item.getId(), qty); // do not lose stock if the order could not be saved
@@ -437,8 +447,8 @@ public class CloudSyncController {
 
         // Return the reserved stock exactly once (the atomic guard above prevents
         // double-restore)
-        if ("CANCELLED".equals(target) && updated.getItemId() != null) {
-            restoreStock(updated.getItemId(), updated.getQuantity());
+        if ("CANCELLED".equals(target) && updated.getListingId() != null) {
+            restoreStock(updated.getListingId(), updated.getQuantity());
         }
         return ResponseEntity.ok(updated);
     }
@@ -494,7 +504,7 @@ public class CloudSyncController {
     }
 
     private boolean hasStoreRole(Authentication auth) {
-        return auth.getAuthorities().stream()
+        return auth != null && auth.getAuthorities() != null && auth.getAuthorities().stream()
                 .anyMatch(a -> a.getAuthority().equals("ROLE_STORE_MANAGER")
                         || a.getAuthority().equals("ROLE_STORE_STAFF"));
     }

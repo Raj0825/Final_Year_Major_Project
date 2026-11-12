@@ -35,8 +35,10 @@ public class AuthService {
             throw new IllegalArgumentException("Choosing a storeId during registration is not permitted");
         }
 
-        if (req.role() == User.Role.STORE_STAFF) {
-            throw new IllegalArgumentException("STORE_STAFF cannot be registered via public signup");
+        if (req.role() != User.Role.CUSTOMER
+                && req.role() != User.Role.NGO
+                && req.role() != User.Role.STORE_MANAGER) {
+            throw new IllegalArgumentException("Invalid role");
         }
 
         User user = User.builder()
@@ -87,7 +89,8 @@ public class AuthService {
             throw new BadCredentialsException("Invalid email or password");
         }
 
-        // If user is STORE_MANAGER but has no storeId in DB, link first store or create one upfront
+        // If user is STORE_MANAGER but has no storeId in DB, link first store or create
+        // one upfront
         if (user.getRole() == User.Role.STORE_MANAGER && (user.getStoreId() == null || user.getStoreId().isBlank())) {
             var stores = storeRepository.findByManagerId(user.getId());
             if (!stores.isEmpty()) {

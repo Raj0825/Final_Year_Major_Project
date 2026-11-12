@@ -174,7 +174,8 @@ public class BatchController {
 
     @GetMapping("/{id}/history")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
-    public List<com.freshrescue.backend.entity.FreshnessPoint> getBatchHistory(@PathVariable String id, Authentication auth) {
+    public List<com.freshrescue.backend.entity.FreshnessPoint> getBatchHistory(@PathVariable String id,
+            Authentication auth) {
         Batch batch = batchService.getBatch(id);
         resolveAndVerifyStore(auth, batch.getStoreId());
         return batch.getFreshnessHistory() != null ? batch.getFreshnessHistory() : Collections.emptyList();
