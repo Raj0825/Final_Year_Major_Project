@@ -3,20 +3,21 @@ package com.freshrescue.backend.controller;
 import com.freshrescue.backend.entity.CloudInventoryItem;
 import com.freshrescue.backend.entity.CloudOrder;
 import com.freshrescue.backend.entity.CloudStore;
+import com.freshrescue.backend.entity.FreshnessPoint;
+import com.freshrescue.backend.entity.Store;
 import com.freshrescue.backend.entity.User;
 import com.freshrescue.backend.repository.CloudInventoryRepository;
 import com.freshrescue.backend.repository.CloudOrderRepository;
 import com.freshrescue.backend.repository.CloudStoreRepository;
+import com.freshrescue.backend.repository.StoreRepository;
 import com.freshrescue.backend.repository.UserRepository;
 import com.freshrescue.backend.security.StoreAuthorizationService;
+import com.freshrescue.backend.service.BatchStateService;
+import com.freshrescue.backend.service.WatchlistService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
-import com.freshrescue.backend.entity.FreshnessPoint;
-import com.freshrescue.backend.entity.Store;
-import com.freshrescue.backend.repository.StoreRepository;
-import com.freshrescue.backend.service.BatchStateService;
-import com.freshrescue.backend.service.WatchlistService;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.geo.GeoJsonPoint;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -32,27 +33,66 @@ import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Cloud sync API for inventory, stores and orders.
+ *
+ * SECURITY CHANGES vs. the previous version:
+ * - POST /orders is now customer/NGO only and CREATE-only. The client may send
+ * only itemId, quantity,
+ * notes and pickupTime. id, qrCode, storeId, customerEmail and status are all
+ * set by the server.
+ * - Existing orders can no longer be overwritten through POST /orders (this was
+ * an IDOR + a bypass
+ * of the FULFILLED check in PATCH /status).
+ * - Stock is decremented atomically inside order creation, and restored when an
+ * order is cancelled.
+ * - The public /inventory/{id}/reserve and /inventory/{id}/release endpoints
+ * are removed
+ * (any customer could zero out or inflate any store's stock).
+ * - Inventory save/batch/sync now verify the EXISTING item belongs to the
+ * caller's store, so one store
+ * can no longer take over another store's item by reusing its id.
+ * - Status changes use an allowlist and an atomic "not already finished" guard.
+ * - IDs are random UUIDs instead of timestamps.
+ *
+ * ASSUMPTIONS ABOUT CloudOrder (rename if your entity differs):
+ * String id, qrCode, storeId, itemId, customerEmail, status, notes; double
+ * quantity; pickupTime (any type)
+ */
 @Slf4j
 @RestController
 @RequestMapping("/api/cloud-sync")
 @RequiredArgsConstructor
 public class CloudSyncController {
 
+    /** Keep these in sync with the status strings your frontend uses. */
+    private static final Set<String> ALLOWED_ORDER_STATUSES = Set.of("RESERVED", "CONFIRMED", "READY", "FULFILLED",
+            "CANCELLED", "EXPIRED");
+    private static final Set<String> TERMINAL_ORDER_STATUSES = Set.of("FULFILLED", "CANCELLED", "EXPIRED");
+
+    private static final String INITIAL_ORDER_STATUS = "RESERVED";
+    private static final double MAX_ORDER_QUANTITY = 1000;
+    private static final int MAX_BULK_ITEMS = 500;
+    private static final int MAX_NOTES_LENGTH = 500;
+
     private final CloudInventoryRepository inventoryRepo;
     private final CloudStoreRepository storeRepo;
     private final CloudOrderRepository orderRepo;
     private final UserRepository userRepository;
     private final StoreAuthorizationService storeAuthService;
-    private final org.springframework.data.mongodb.core.MongoTemplate mongoTemplate;
+    private final MongoTemplate mongoTemplate;
     private final WatchlistService watchlistService;
     private final StoreRepository storeRepository;
     private final BatchStateService batchStateService;
 
-    // --- Inventory Sync ---
+    // =====================================================================
+    // Inventory
+    // =====================================================================
+
     @GetMapping("/inventory")
     public List<CloudInventoryItem> getAllInventory() {
         List<CloudInventoryItem> all = inventoryRepo.findAll();
-        // Item D: Exclude freshnessHistory from GET /cloud-sync/inventory responses (served only through /history)
+        // freshnessHistory is served only through /history
         for (CloudInventoryItem item : all) {
             item.setFreshnessHistory(null);
         }
@@ -63,28 +103,12 @@ public class CloudSyncController {
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public CloudInventoryItem saveInventoryItem(@RequestBody CloudInventoryItem item, Authentication auth) {
         Set<String> authorized = storeAuthService.getAuthorizedStoreIds(auth);
-        if (item.getStoreId() == null || authorized.stream().noneMatch(id -> id.equalsIgnoreCase(item.getStoreId().trim()))) {
-            throw new AccessDeniedException("Cannot add inventory for unauthorized store.");
-        }
-        if (item.getId() == null || item.getId().isBlank()) {
-            item.setId("inv-" + System.currentTimeMillis());
-        }
-        if (item.getCreatedAt() == null) {
-            item.setCreatedAt(Instant.now());
+        CloudInventoryItem prepared = prepareForSave(item, authorized);
+        if (prepared == null) {
+            throw new AccessDeniedException("Cannot save this inventory item (store mismatch or invalid data).");
         }
 
-        CloudInventoryItem existing = inventoryRepo.findById(item.getId()).orElse(null);
-
-        // Item D: Keep stored history and ignore any history sent by the client; only server appends points
-        if (existing != null && existing.getFreshnessHistory() != null) {
-            item.setFreshnessHistory(new ArrayList<>(existing.getFreshnessHistory()));
-        } else {
-            item.setFreshnessHistory(new ArrayList<>());
-        }
-
-        appendFreshnessPointIfChanged(item, existing);
-
-        CloudInventoryItem saved = inventoryRepo.save(item);
+        CloudInventoryItem saved = inventoryRepo.save(prepared);
         triggerWatchlistCheck(saved);
         saved.setFreshnessHistory(null);
         return saved;
@@ -92,32 +116,23 @@ public class CloudSyncController {
 
     @PostMapping("/inventory/batch")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
-    public List<CloudInventoryItem> saveInventoryBatch(@RequestBody List<CloudInventoryItem> items, Authentication auth) {
+    public List<CloudInventoryItem> saveInventoryBatch(@RequestBody List<CloudInventoryItem> items,
+            Authentication auth) {
+        if (items == null || items.size() > MAX_BULK_ITEMS) {
+            throw new IllegalArgumentException("Batch must contain at most " + MAX_BULK_ITEMS + " items.");
+        }
         Set<String> authorized = storeAuthService.getAuthorizedStoreIds(auth);
+
         List<CloudInventoryItem> validItems = new ArrayList<>();
         for (CloudInventoryItem item : items) {
-            if (item.getStoreId() != null && authorized.stream().anyMatch(id -> id.equalsIgnoreCase(item.getStoreId().trim()))) {
-                if (item.getId() == null || item.getId().isBlank()) {
-                    item.setId("inv-" + System.currentTimeMillis() + "-" + (int) (Math.random() * 1000));
-                }
-                if (item.getCreatedAt() == null) {
-                    item.setCreatedAt(Instant.now());
-                }
-                CloudInventoryItem existing = inventoryRepo.findById(item.getId()).orElse(null);
-
-                // Item D: Keep stored history and ignore client-provided history
-                if (existing != null && existing.getFreshnessHistory() != null) {
-                    item.setFreshnessHistory(new ArrayList<>(existing.getFreshnessHistory()));
-                } else {
-                    item.setFreshnessHistory(new ArrayList<>());
-                }
-
-                appendFreshnessPointIfChanged(item, existing);
-                validItems.add(item);
+            CloudInventoryItem prepared = prepareForSave(item, authorized);
+            if (prepared != null) {
+                validItems.add(prepared);
             } else {
-                log.warn("Ignored item {} with unauthorized storeId {}", item.getName(), item.getStoreId());
+                log.warn("Ignored inventory item (unauthorized store, foreign existing item, or invalid data)");
             }
         }
+
         List<CloudInventoryItem> saved = inventoryRepo.saveAll(validItems);
         for (CloudInventoryItem item : saved) {
             triggerWatchlistCheck(item);
@@ -129,34 +144,22 @@ public class CloudSyncController {
     @PutMapping("/inventory/sync")
     @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
     public List<CloudInventoryItem> syncAllInventory(@RequestBody List<CloudInventoryItem> items, Authentication auth) {
+        if (items == null || items.size() > MAX_BULK_ITEMS) {
+            throw new IllegalArgumentException("Sync must contain at most " + MAX_BULK_ITEMS + " items.");
+        }
         Set<String> authorized = storeAuthService.getAuthorizedStoreIds(auth);
         if (authorized.isEmpty()) {
             throw new AccessDeniedException("No store associated with your account.");
         }
 
-        // Upsert ONLY items belonging to caller's authorized store(s); NEVER deleteAll()
+        // Upsert ONLY items belonging to the caller's store(s); never deleteAll()
         List<CloudInventoryItem> authorizedItems = new ArrayList<>();
         for (CloudInventoryItem item : items) {
-            if (item.getStoreId() != null && authorized.stream().anyMatch(id -> id.equalsIgnoreCase(item.getStoreId().trim()))) {
-                if (item.getId() == null || item.getId().isBlank()) {
-                    item.setId("inv-" + System.currentTimeMillis() + "-" + (int) (Math.random() * 1000));
-                }
-                if (item.getCreatedAt() == null) {
-                    item.setCreatedAt(Instant.now());
-                }
-                CloudInventoryItem existing = inventoryRepo.findById(item.getId()).orElse(null);
-
-                // Item D: Keep stored history and ignore client-provided history
-                if (existing != null && existing.getFreshnessHistory() != null) {
-                    item.setFreshnessHistory(new ArrayList<>(existing.getFreshnessHistory()));
-                } else {
-                    item.setFreshnessHistory(new ArrayList<>());
-                }
-
-                appendFreshnessPointIfChanged(item, existing);
-                authorizedItems.add(item);
+            CloudInventoryItem prepared = prepareForSave(item, authorized);
+            if (prepared != null) {
+                authorizedItems.add(prepared);
             } else {
-                log.warn("Sync ignored foreign/unauthorized item {} for storeId {}", item.getName(), item.getStoreId());
+                log.warn("Sync ignored foreign/invalid inventory item");
             }
         }
 
@@ -178,7 +181,8 @@ public class CloudSyncController {
         if (!storeAuthService.isAuthorizedForStore(auth, item.getStoreId())) {
             throw new AccessDeniedException("Unauthorized store access");
         }
-        return ResponseEntity.ok(item.getFreshnessHistory() != null ? item.getFreshnessHistory() : Collections.emptyList());
+        return ResponseEntity
+                .ok(item.getFreshnessHistory() != null ? item.getFreshnessHistory() : Collections.emptyList());
     }
 
     @DeleteMapping("/inventory/{id}")
@@ -189,235 +193,11 @@ public class CloudSyncController {
             return ResponseEntity.noContent().build();
         }
         Set<String> authorized = storeAuthService.getAuthorizedStoreIds(auth);
-        if (item.getStoreId() == null || authorized.stream().noneMatch(sid -> sid.equalsIgnoreCase(item.getStoreId().trim()))) {
+        if (!isAuthorizedStoreId(authorized, item.getStoreId())) {
             throw new AccessDeniedException("Cannot delete inventory of another store.");
         }
         inventoryRepo.deleteById(id);
         return ResponseEntity.noContent().build();
-    }
-
-    // --- Atomic Stock Reservation & Release for Customers/NGOs ---
-    @PostMapping("/inventory/{id}/reserve")
-    @PreAuthorize("hasAnyRole('NGO', 'CUSTOMER')")
-    public ResponseEntity<?> reserveInventoryStock(@PathVariable String id, @RequestParam double quantity) {
-        if (Double.isNaN(quantity) || Double.isInfinite(quantity) || quantity <= 0) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Quantity must be a positive finite number."));
-        }
-
-        Query query = Query.query(Criteria.where("id").is(id).and("available").gte(quantity));
-        Update update = new Update().inc("available", -quantity);
-        CloudInventoryItem updated = mongoTemplate.findAndModify(
-                query,
-                update,
-                FindAndModifyOptions.options().returnNew(true),
-                CloudInventoryItem.class
-        );
-
-        if (updated == null) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Not enough stock available or item not found."));
-        }
-        return ResponseEntity.ok(updated);
-    }
-
-    @PostMapping("/inventory/{id}/release")
-    @PreAuthorize("hasAnyRole('NGO', 'CUSTOMER', 'STORE_MANAGER', 'STORE_STAFF')")
-    public ResponseEntity<?> releaseInventoryStock(@PathVariable String id, @RequestParam double quantity) {
-        if (Double.isNaN(quantity) || Double.isInfinite(quantity) || quantity <= 0) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Quantity must be a positive finite number."));
-        }
-
-        Query query = Query.query(Criteria.where("id").is(id));
-        Update update = new Update().inc("available", quantity);
-        CloudInventoryItem updated = mongoTemplate.findAndModify(
-                query,
-                update,
-                FindAndModifyOptions.options().returnNew(true),
-                CloudInventoryItem.class
-        );
-
-        if (updated == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Item not found."));
-        }
-        return ResponseEntity.ok(updated);
-    }
-
-    // --- Stores Sync ---
-    @GetMapping("/stores")
-    public List<CloudStore> getAllStores() {
-        return storeRepo.findAll();
-    }
-
-    @PostMapping("/stores")
-    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
-    public CloudStore saveStore(@RequestBody CloudStore store, Authentication auth) {
-        Set<String> authorized = storeAuthService.getAuthorizedStoreIds(auth);
-        if (store.getId() != null && authorized.stream().noneMatch(id -> id.equalsIgnoreCase(store.getId().trim()))) {
-            throw new AccessDeniedException("Cannot create/update store with unauthorized store id.");
-        }
-        if (store.getId() == null || store.getId().isBlank()) {
-            store.setId("store-" + System.currentTimeMillis());
-        }
-        return storeRepo.save(store);
-    }
-
-    @PutMapping("/stores/sync")
-    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
-    public List<CloudStore> syncAllStores(@RequestBody List<CloudStore> stores, Authentication auth) {
-        Set<String> authorized = storeAuthService.getAuthorizedStoreIds(auth);
-        if (authorized.isEmpty()) {
-            throw new AccessDeniedException("No store associated with your account.");
-        }
-
-        // Upsert ONLY stores whose ID matches caller's authorized store(s); NEVER deleteAll()
-        List<CloudStore> authorizedStores = stores.stream()
-                .filter(s -> s.getId() != null && authorized.stream().anyMatch(id -> id.equalsIgnoreCase(s.getId().trim())))
-                .collect(Collectors.toList());
-
-        return storeRepo.saveAll(authorizedStores);
-    }
-
-    @DeleteMapping("/stores/{id}")
-    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
-    public ResponseEntity<Void> deleteStore(@PathVariable String id, Authentication auth) {
-        Set<String> authorized = storeAuthService.getAuthorizedStoreIds(auth);
-        if (authorized.stream().noneMatch(sid -> sid.equalsIgnoreCase(id.trim()))) {
-            throw new AccessDeniedException("Cannot delete store: unauthorized.");
-        }
-        storeRepo.deleteById(id);
-        return ResponseEntity.noContent().build();
-    }
-
-    // --- Orders Sync ---
-    @GetMapping("/orders")
-    public List<CloudOrder> getAllOrders(Authentication auth) {
-        if (auth == null || !auth.isAuthenticated()) {
-            return Collections.emptyList();
-        }
-        String principal = auth.getName();
-        User user = userRepository.findById(principal).orElse(null);
-        if (user == null) {
-            user = userRepository.findByEmail(principal.toLowerCase().trim()).orElse(null);
-        }
-        String email = user != null ? user.getEmail() : principal;
-
-        boolean isStoreStaffOrManager = auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_STORE_MANAGER") || a.getAuthority().equals("ROLE_STORE_STAFF"));
-
-        if (isStoreStaffOrManager) {
-            Set<String> authorizedStoreIds = storeAuthService.getAuthorizedStoreIds(auth);
-            if (authorizedStoreIds.isEmpty()) {
-                return Collections.emptyList();
-            }
-            return orderRepo.findByStoreIdIn(authorizedStoreIds);
-        } else {
-            // Customer / NGO: ONLY return orders matching customer's email via indexed repository query
-            if (email == null || email.isBlank()) {
-                return Collections.emptyList();
-            }
-            return orderRepo.findByCustomerEmailIgnoreCase(email.toLowerCase().trim());
-        }
-    }
-
-    @PostMapping("/orders")
-    public ResponseEntity<?> saveOrder(@RequestBody CloudOrder order, Authentication auth) {
-        boolean hasId = order.getId() != null && !order.getId().isBlank();
-        boolean hasQrCode = order.getQrCode() != null && !order.getQrCode().isBlank();
-        if (!hasId && !hasQrCode) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Order must have an id or qrCode"));
-        }
-
-        if (auth != null && auth.isAuthenticated()) {
-            String principal = auth.getName();
-            User user = userRepository.findById(principal).orElse(null);
-            if (user == null) {
-                user = userRepository.findByEmail(principal.toLowerCase().trim()).orElse(null);
-            }
-            String email = user != null ? user.getEmail() : principal;
-
-            boolean isCustomer = auth.getAuthorities().stream()
-                    .anyMatch(a -> a.getAuthority().equals("ROLE_CUSTOMER") || a.getAuthority().equals("ROLE_NGO"));
-            if (isCustomer && email != null) {
-                order.setCustomerEmail(email.toLowerCase().trim());
-            }
-        }
-
-        // Idempotency: If an order with the same qrCode already exists, update it (keep existing id)
-        if (hasQrCode) {
-            Optional<CloudOrder> existingByQr = orderRepo.findByQrCode(order.getQrCode().trim());
-            if (existingByQr.isPresent()) {
-                CloudOrder ex = existingByQr.get();
-                if (order.getStatus() != null) ex.setStatus(order.getStatus());
-                if (order.getNotes() != null) ex.setNotes(order.getNotes());
-                if (order.getPickupTime() != null) ex.setPickupTime(order.getPickupTime());
-                return ResponseEntity.ok(orderRepo.save(ex));
-            }
-        }
-
-        if (hasId) {
-            Optional<CloudOrder> existing = orderRepo.findById(order.getId().trim());
-            if (existing.isPresent()) {
-                CloudOrder ex = existing.get();
-                if (order.getStatus() != null) ex.setStatus(order.getStatus());
-                if (order.getNotes() != null) ex.setNotes(order.getNotes());
-                if (order.getPickupTime() != null) ex.setPickupTime(order.getPickupTime());
-                return ResponseEntity.ok(orderRepo.save(ex));
-            }
-        } else {
-            order.setId("ord-" + System.currentTimeMillis());
-        }
-
-        return ResponseEntity.ok(orderRepo.save(order));
-    }
-
-    @PatchMapping("/orders/{id}/status")
-    public ResponseEntity<CloudOrder> updateOrderStatus(
-            @PathVariable String id,
-            @RequestParam String status,
-            Authentication auth) {
-
-        CloudOrder order = orderRepo.findById(id).orElse(null);
-        if (order == null) {
-            return ResponseEntity.notFound().build();
-        }
-
-        String targetStatus = status.trim().toUpperCase();
-
-        if (auth == null || !auth.isAuthenticated()) {
-            throw new AccessDeniedException("Authentication required.");
-        }
-
-        String principal = auth.getName();
-        User user = userRepository.findById(principal).orElse(null);
-        if (user == null) {
-            user = userRepository.findByEmail(principal.toLowerCase().trim()).orElse(null);
-        }
-        String userEmail = user != null ? user.getEmail() : principal;
-
-        boolean isStoreRole = auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_STORE_MANAGER") || a.getAuthority().equals("ROLE_STORE_STAFF"));
-
-        if ("FULFILLED".equalsIgnoreCase(targetStatus)) {
-            // Only store roles of the order's own store may set FULFILLED
-            if (!isStoreRole || !storeAuthService.isAuthorizedForStore(auth, order.getStoreId())) {
-                throw new AccessDeniedException("Only authorized staff of the order's store may mark it FULFILLED.");
-            }
-        } else if ("CANCELLED".equalsIgnoreCase(targetStatus)) {
-            // Customer may cancel only their own order; store staff of the store may also cancel
-            boolean isOwnerCustomer = userEmail != null && order.getCustomerEmail() != null
-                    && userEmail.equalsIgnoreCase(order.getCustomerEmail().trim());
-            boolean isOwnerStore = isStoreRole && storeAuthService.isAuthorizedForStore(auth, order.getStoreId());
-            if (!isOwnerCustomer && !isOwnerStore) {
-                throw new AccessDeniedException("You do not have permission to cancel this order.");
-            }
-        } else {
-            // Any other status change requires store role of this store
-            if (!isStoreRole || !storeAuthService.isAuthorizedForStore(auth, order.getStoreId())) {
-                throw new AccessDeniedException("Unauthorized status modification.");
-            }
-        }
-
-        order.setStatus(targetStatus);
-        return ResponseEntity.ok(orderRepo.save(order));
     }
 
     @PostMapping("/inventory/{id}/discard")
@@ -433,7 +213,12 @@ public class CloudSyncController {
         if (!storeAuthService.isAuthorizedForStore(auth, item.getStoreId())) {
             throw new AccessDeniedException("Unauthorized store access.");
         }
-        double qtyToDiscard = (quantity != null && quantity > 0) ? quantity : item.getAvailable();
+        if (quantity != null && (quantity.isNaN() || quantity.isInfinite())) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Quantity must be a finite number."));
+        }
+
+        double requested = (quantity != null && quantity > 0) ? quantity : item.getAvailable();
+        double qtyToDiscard = Math.min(requested, item.getAvailable()); // cannot discard more than is available
         item.setDiscardedQuantity(item.getDiscardedQuantity() + qtyToDiscard);
         item.setAvailable(Math.max(0, item.getAvailable() - qtyToDiscard));
         item.setStatus("Discarded");
@@ -451,6 +236,294 @@ public class CloudSyncController {
         CloudInventoryItem saved = inventoryRepo.save(item);
         saved.setFreshnessHistory(null);
         return ResponseEntity.ok(saved);
+    }
+
+    // NOTE: /inventory/{id}/reserve and /inventory/{id}/release were REMOVED on
+    // purpose.
+    // Stock is now reserved inside POST /orders and returned inside PATCH
+    // /orders/{id}/status (CANCELLED).
+
+    // =====================================================================
+    // Stores
+    // =====================================================================
+
+    @GetMapping("/stores")
+    public List<CloudStore> getAllStores() {
+        return storeRepo.findAll();
+    }
+
+    @PostMapping("/stores")
+    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
+    public CloudStore saveStore(@RequestBody CloudStore store, Authentication auth) {
+        Set<String> authorized = storeAuthService.getAuthorizedStoreIds(auth);
+        if (store.getId() != null && !isAuthorizedStoreId(authorized, store.getId())) {
+            throw new AccessDeniedException("Cannot create/update store with unauthorized store id.");
+        }
+        if (store.getId() == null || store.getId().isBlank()) {
+            store.setId("store-" + UUID.randomUUID());
+        }
+        return storeRepo.save(store);
+    }
+
+    @PutMapping("/stores/sync")
+    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
+    public List<CloudStore> syncAllStores(@RequestBody List<CloudStore> stores, Authentication auth) {
+        Set<String> authorized = storeAuthService.getAuthorizedStoreIds(auth);
+        if (authorized.isEmpty()) {
+            throw new AccessDeniedException("No store associated with your account.");
+        }
+        if (stores == null || stores.size() > MAX_BULK_ITEMS) {
+            throw new IllegalArgumentException("Sync must contain at most " + MAX_BULK_ITEMS + " stores.");
+        }
+
+        // Upsert ONLY stores whose ID matches the caller's authorized store(s); never
+        // deleteAll()
+        List<CloudStore> authorizedStores = stores.stream()
+                .filter(s -> s.getId() != null && isAuthorizedStoreId(authorized, s.getId()))
+                .collect(Collectors.toList());
+
+        return storeRepo.saveAll(authorizedStores);
+    }
+
+    @DeleteMapping("/stores/{id}")
+    @PreAuthorize("hasAnyRole('STORE_MANAGER', 'STORE_STAFF')")
+    public ResponseEntity<Void> deleteStore(@PathVariable String id, Authentication auth) {
+        Set<String> authorized = storeAuthService.getAuthorizedStoreIds(auth);
+        if (!isAuthorizedStoreId(authorized, id)) {
+            throw new AccessDeniedException("Cannot delete store: unauthorized.");
+        }
+        storeRepo.deleteById(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    // =====================================================================
+    // Orders
+    // =====================================================================
+
+    @GetMapping("/orders")
+    public List<CloudOrder> getAllOrders(Authentication auth) {
+        if (auth == null || !auth.isAuthenticated()) {
+            return Collections.emptyList();
+        }
+
+        if (hasStoreRole(auth)) {
+            Set<String> authorizedStoreIds = storeAuthService.getAuthorizedStoreIds(auth);
+            if (authorizedStoreIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+            return orderRepo.findByStoreIdIn(authorizedStoreIds);
+        }
+
+        // Customer / NGO: only their own orders
+        User user = resolveUser(auth);
+        String email = user != null ? user.getEmail() : null;
+        if (email == null || email.isBlank()) {
+            return Collections.emptyList();
+        }
+        return orderRepo.findByCustomerEmailIgnoreCase(email.toLowerCase().trim());
+    }
+
+    /**
+     * Create an order (reservation). The client sends ONLY: itemId, quantity, and
+     * optionally notes / pickupTime.
+     * Everything else (id, qrCode, storeId, customerEmail, status) is decided by
+     * the server.
+     */
+    @PostMapping("/orders")
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'NGO')")
+    public ResponseEntity<?> createOrder(@RequestBody CloudOrder in, Authentication auth) {
+        User user = resolveUser(auth);
+        if (user == null || user.getEmail() == null || user.getEmail().isBlank()) {
+            throw new AccessDeniedException("Unknown user.");
+        }
+
+        if (in.getItemId() == null || in.getItemId().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "itemId is required."));
+        }
+        double qty = in.getQuantity();
+        if (Double.isNaN(qty) || Double.isInfinite(qty) || qty <= 0 || qty > MAX_ORDER_QUANTITY) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("message", "Quantity must be between 0 and " + (int) MAX_ORDER_QUANTITY + "."));
+        }
+
+        String itemId = in.getItemId().trim();
+        CloudInventoryItem current = inventoryRepo.findById(itemId).orElse(null);
+        if (current == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Item not found."));
+        }
+        if ("Discarded".equalsIgnoreCase(current.getStatus())
+                || batchStateService.isExpiredDate(current.getExpiryDate())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Item is no longer available."));
+        }
+
+        // Atomic stock decrement: only succeeds if enough stock is still available
+        CloudInventoryItem item = mongoTemplate.findAndModify(
+                Query.query(Criteria.where("id").is(itemId).and("available").gte(qty)),
+                new Update().inc("available", -qty),
+                FindAndModifyOptions.options().returnNew(true),
+                CloudInventoryItem.class);
+        if (item == null) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Not enough stock available."));
+        }
+
+        try {
+            CloudOrder order = new CloudOrder();
+            order.setId("ord-" + UUID.randomUUID());
+            order.setQrCode(UUID.randomUUID().toString()); // server-generated, unguessable
+            order.setCustomerEmail(user.getEmail().toLowerCase().trim());
+            order.setStoreId(item.getStoreId()); // from the DB, never from the client
+            order.setItemId(item.getId());
+            order.setQuantity(qty);
+            order.setStatus(INITIAL_ORDER_STATUS); // never from the client
+            order.setPickupTime(in.getPickupTime());
+            order.setNotes(truncate(in.getNotes(), MAX_NOTES_LENGTH));
+            // ADAPT: set the price from the DB item, never from the client, e.g.
+            // order.setTotalPrice(item.getCurrentPrice() * qty);
+            return ResponseEntity.ok(orderRepo.save(order));
+        } catch (RuntimeException e) {
+            restoreStock(item.getId(), qty); // do not lose stock if the order could not be saved
+            throw e;
+        }
+    }
+
+    @PatchMapping("/orders/{id}/status")
+    public ResponseEntity<?> updateOrderStatus(
+            @PathVariable String id,
+            @RequestParam String status,
+            Authentication auth) {
+
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new AccessDeniedException("Authentication required.");
+        }
+
+        String target = status == null ? "" : status.trim().toUpperCase();
+        if (!ALLOWED_ORDER_STATUSES.contains(target)) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Invalid status."));
+        }
+
+        CloudOrder order = orderRepo.findById(id).orElse(null);
+        if (order == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        User user = resolveUser(auth);
+        String userEmail = user != null ? user.getEmail() : null;
+
+        boolean storeOwnsOrder = hasStoreRole(auth) && storeAuthService.isAuthorizedForStore(auth, order.getStoreId());
+        boolean customerOwnsOrder = userEmail != null && order.getCustomerEmail() != null
+                && userEmail.trim().equalsIgnoreCase(order.getCustomerEmail().trim());
+
+        if ("CANCELLED".equals(target)) {
+            // Customer may cancel only their own order; the order's own store may also
+            // cancel
+            if (!customerOwnsOrder && !storeOwnsOrder) {
+                throw new AccessDeniedException("You do not have permission to cancel this order.");
+            }
+        } else if (!storeOwnsOrder) {
+            // FULFILLED and every other status: only staff of the order's own store
+            throw new AccessDeniedException("Only authorized staff of the order's store may change this status.");
+        }
+
+        // Atomic transition: only succeeds if the order is not already finished
+        CloudOrder updated = mongoTemplate.findAndModify(
+                Query.query(Criteria.where("id").is(id).and("status").nin(TERMINAL_ORDER_STATUSES)),
+                new Update().set("status", target),
+                FindAndModifyOptions.options().returnNew(true),
+                CloudOrder.class);
+        if (updated == null) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Map.of("message", "Order is already finished and cannot be changed."));
+        }
+
+        // Return the reserved stock exactly once (the atomic guard above prevents
+        // double-restore)
+        if ("CANCELLED".equals(target) && updated.getItemId() != null) {
+            restoreStock(updated.getItemId(), updated.getQuantity());
+        }
+        return ResponseEntity.ok(updated);
+    }
+
+    // =====================================================================
+    // Helpers
+    // =====================================================================
+
+    /**
+     * Validates and prepares an inventory item for saving.
+     * Returns null if the item must be rejected: invalid data, a store the caller
+     * does not own,
+     * or an EXISTING item (same id) that belongs to a different store.
+     */
+    private CloudInventoryItem prepareForSave(CloudInventoryItem item, Set<String> authorized) {
+        if (item == null || item.getStoreId() == null || !isAuthorizedStoreId(authorized, item.getStoreId())) {
+            return null;
+        }
+        double available = item.getAvailable();
+        if (Double.isNaN(available) || Double.isInfinite(available) || available < 0) {
+            return null;
+        }
+
+        if (item.getId() == null || item.getId().isBlank()) {
+            item.setId("inv-" + UUID.randomUUID());
+        }
+        if (item.getCreatedAt() == null) {
+            item.setCreatedAt(Instant.now());
+        }
+
+        CloudInventoryItem existing = inventoryRepo.findById(item.getId()).orElse(null);
+        if (existing != null && !isAuthorizedStoreId(authorized, existing.getStoreId())) {
+            return null; // the id belongs to another store: refuse to overwrite it
+        }
+
+        // Keep stored history and ignore any history sent by the client; only the
+        // server appends points
+        if (existing != null && existing.getFreshnessHistory() != null) {
+            item.setFreshnessHistory(new ArrayList<>(existing.getFreshnessHistory()));
+        } else {
+            item.setFreshnessHistory(new ArrayList<>());
+        }
+        appendFreshnessPointIfChanged(item, existing);
+        return item;
+    }
+
+    private boolean isAuthorizedStoreId(Set<String> authorized, String storeId) {
+        if (storeId == null || authorized == null) {
+            return false;
+        }
+        String trimmed = storeId.trim();
+        return authorized.stream().anyMatch(id -> id.equalsIgnoreCase(trimmed));
+    }
+
+    private boolean hasStoreRole(Authentication auth) {
+        return auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_STORE_MANAGER")
+                        || a.getAuthority().equals("ROLE_STORE_STAFF"));
+    }
+
+    private User resolveUser(Authentication auth) {
+        if (auth == null || auth.getName() == null) {
+            return null;
+        }
+        String principal = auth.getName();
+        return userRepository.findById(principal)
+                .or(() -> userRepository.findByEmail(principal.toLowerCase().trim()))
+                .orElse(null);
+    }
+
+    private void restoreStock(String itemId, double quantity) {
+        if (itemId == null || Double.isNaN(quantity) || Double.isInfinite(quantity) || quantity <= 0) {
+            return;
+        }
+        mongoTemplate.updateFirst(
+                Query.query(Criteria.where("id").is(itemId)),
+                new Update().inc("available", quantity),
+                CloudInventoryItem.class);
+    }
+
+    private String truncate(String s, int max) {
+        if (s == null) {
+            return null;
+        }
+        return s.length() <= max ? s : s.substring(0, max);
     }
 
     private void appendFreshnessPointIfChanged(CloudInventoryItem item, CloudInventoryItem existing) {
@@ -497,8 +570,7 @@ public class CloudSyncController {
                     item.getCurrentPrice(),
                     item.getDiscountPercent(),
                     item.getStore(),
-                    storeLoc
-            );
+                    storeLoc);
         } catch (Exception e) {
             log.warn("Failed watchlist check for item {}: {}", item.getId(), e.getMessage());
         }
