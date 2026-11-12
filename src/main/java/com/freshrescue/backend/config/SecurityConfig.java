@@ -46,11 +46,11 @@ public class SecurityConfig {
     private final JwtAuthFilter jwtAuthFilter;
 
     /**
-     * Comma-separated list of exact origins, e.g.
+     * Comma-separated list of allowed origins or scoped origin patterns, e.g.
      * CORS_ALLOWED_ORIGINS=https://final-year-major-project-ashen.vercel.app
-     * Local development defaults are defined in application.yml.
+     * Local development and scoped Vercel deployment defaults are defined in application.yml.
      */
-    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,https://final-year-major-project-ashen.vercel.app}")
+    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,https://final-year-major-project-ashen.vercel.app,https://final-year-major-project-*-raj-shah*.vercel.app}")
     private List<String> allowedOrigins;
 
     @Bean
@@ -68,7 +68,7 @@ public class SecurityConfig {
                         .toList();
 
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(origins);
+        config.setAllowedOriginPatterns(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
         config.setAllowCredentials(false); // JWT travels in the Authorization header, not in cookies

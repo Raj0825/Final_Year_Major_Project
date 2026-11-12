@@ -25,7 +25,7 @@ jwt:
 
 # Discount tier thresholds, kept configurable rather than hardcoded in the service
 cors:
-  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000,https://final-year-major-project-ashen.vercel.app}
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000,https://final-year-major-project-ashen.vercel.app,https://final-year-major-project-*-raj-shah*.vercel.app}
 
 app:
   pricing:
